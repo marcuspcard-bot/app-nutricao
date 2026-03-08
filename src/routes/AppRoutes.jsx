@@ -8,6 +8,11 @@ import DadosFisicos from "../pages/onboarding/DadosFisicos"
 import Objetivo from "../pages/onboarding/Objetivo"
 import Preferencias from "../pages/onboarding/Preferencias"
 import Dashboard from "../pages/app/Dashboard"
+import Altura from "../pages/onboarding/Altura"
+import CalculoMetabolico from "../pages/onboarding/CalculoMetabolico"
+import Idade from "../pages/onboarding/Idade"
+import Peso from "../pages/onboarding/Peso"
+import Sexo from "../pages/onboarding/Sexo"
 
 function AppRoutes() {
   return (
@@ -29,6 +34,16 @@ function AppRoutes() {
         <Route path="/preferencias" element={<Preferencias />} />
 
         <Route path="/dashboard" element={<Dashboard />} />
+
+        <Route path="/altura" element={<Altura />} />
+
+        <Route path="/calculometabolico" element={<CalculoMetabolico />} />
+
+        <Route path="/idade" element={<Idade />} />
+
+        <Route path="/peso" element={<Peso />} />
+
+        <Route path="/sexo" element={<Sexo />} />
 
       </Routes>
     </BrowserRouter>

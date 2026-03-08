@@ -1,31 +1,31 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 
-function Nome() {
+function Idade() {
 
-  const [nome, setNome] = useState("")
+  const [idade, setIdade] = useState("")
   const navigate = useNavigate()
 
   function continuar() {
 
-    if (!nome) {
-      alert("Digite seu nome")
+    if (!idade) {
+      alert("Digite sua idade")
       return
     }
 
-    navigate("/dados")
+    navigate("/peso")
   }
 
   return (
     <div>
 
-      <h1>Qual é o seu nome?</h1>
+      <h1>Qual é a sua idade?</h1>
 
       <input
-        type="text"
-        placeholder="Digite seu nome"
-        value={nome}
-        onChange={(e) => setNome(e.target.value)}
+        type="number"
+        placeholder="Digite sua idade"
+        value={idade}
+        onChange={(e) => setIdade(e.target.value)}
       />
 
       <br />
@@ -39,4 +39,4 @@ function Nome() {
   )
 }
 
-export default Nome
+export default Idade
