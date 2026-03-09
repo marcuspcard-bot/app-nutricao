@@ -1,17 +1,22 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { useUserStore } from "../../store/userStore"
 
 function Idade() {
 
-  const [idade, setIdade] = useState("")
+  const [idadeInput, setIdadeInput] = useState("")
+  const setIdade = useUserStore((state) => state.setIdade)
+
   const navigate = useNavigate()
 
   function continuar() {
 
-    if (!idade) {
+    if (!idadeInput) {
       alert("Digite sua idade")
       return
     }
+
+    setIdade(idadeInput)
 
     navigate("/peso")
   }
@@ -19,17 +24,16 @@ function Idade() {
   return (
     <div>
 
-      <h1>Qual é a sua idade?</h1>
+      <h1>Qual é sua idade?</h1>
 
       <input
         type="number"
         placeholder="Digite sua idade"
-        value={idade}
-        onChange={(e) => setIdade(e.target.value)}
+        value={idadeInput}
+        onChange={(e) => setIdadeInput(e.target.value)}
       />
 
-      <br />
-      <br />
+      <br /><br />
 
       <button onClick={continuar}>
         Continuar

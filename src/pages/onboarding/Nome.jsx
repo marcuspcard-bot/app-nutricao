@@ -1,9 +1,12 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { useUserStore } from "../../store/userStore"
 
 function Nome() {
 
-  const [nome, setNome] = useState("")
+  const [nome, setNomeInput] = useState("")
+  const setNome = useUserStore((state) => state.setNome)
+
   const navigate = useNavigate()
 
   function continuar() {
@@ -13,7 +16,9 @@ function Nome() {
       return
     }
 
-    navigate("/dados")
+    setNome(nome)
+
+    navigate("/idade")
   }
 
   return (
@@ -25,11 +30,10 @@ function Nome() {
         type="text"
         placeholder="Digite seu nome"
         value={nome}
-        onChange={(e) => setNome(e.target.value)}
+        onChange={(e) => setNomeInput(e.target.value)}
       />
 
-      <br />
-      <br />
+      <br /><br />
 
       <button onClick={continuar}>
         Continuar
