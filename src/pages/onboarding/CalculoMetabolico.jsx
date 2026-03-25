@@ -1,9 +1,7 @@
-import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useUserStore } from "../../store/userStore"
 
 function CalculoMetabolico() {
-
   const navigate = useNavigate()
 
   const nome = useUserStore((state) => state.nome)
@@ -13,75 +11,47 @@ function CalculoMetabolico() {
   const sexo = useUserStore((state) => state.sexo)
   const atividade = useUserStore((state) => state.atividade)
   const objetivo = useUserStore((state) => state.objetivo)
+  const setCalculoMetabolico = useUserStore((state) => state.setCalculoMetabolico)
 
-  const [tmb, setTmb] = useState(0)
-  const [tdee, setTdee] = useState(0)
-  const [caloriasObjetivo, setCaloriasObjetivo] = useState(0)
+  const pesoNum = Number(peso)
+  const alturaNum = Number(altura)
+  const idadeNum = Number(idade)
+  const dadosCompletos = Boolean(peso && altura && idade && sexo)
 
-  useEffect(() => {
+  let tmb = 0
+  if (dadosCompletos) {
+    if (sexo === "masculino") {
+      tmb = 10 * pesoNum + 6.25 * alturaNum - 5 * idadeNum + 5
+    } else {
+      tmb = 10 * pesoNum + 6.25 * alturaNum - 5 * idadeNum - 161
+    }
+  }
 
-    console.log("Dados recebidos do store:")
-    console.log("nome:", nome)
-    console.log("idade:", idade)
-    console.log("peso:", peso)
-    console.log("altura:", altura)
-    console.log("sexo:", sexo)
-    console.log("atividade:", atividade)
-    console.log("objetivo:", objetivo)
+  let fatorAtividade = 1.2
+  if (atividade === "leve") fatorAtividade = 1.375
+  if (atividade === "moderado") fatorAtividade = 1.55
+  if (atividade === "alto") fatorAtividade = 1.725
+  if (atividade === "muito_alto") fatorAtividade = 1.9
 
-    if (!peso || !altura || !idade || !sexo) {
-      console.log("Algum dado está vazio")
+  const tdee = tmb * fatorAtividade
+
+  let caloriasObjetivo = tdee
+  if (objetivo === "emagrecer") caloriasObjetivo = tdee - 400
+  if (objetivo === "ganhar_massa") caloriasObjetivo = tdee + 400
+
+  function continuar() {
+    if (!dadosCompletos) {
+      alert("Complete os dados do onboarding antes de continuar.")
+      navigate("/nome")
       return
     }
 
-    const pesoNum = Number(peso)
-    const alturaNum = Number(altura)
-    const idadeNum = Number(idade)
+    setCalculoMetabolico({
+      tmb: Math.round(tmb),
+      tdee: Math.round(tdee),
+      caloriasObjetivo: Math.round(caloriasObjetivo),
+    })
 
-    let metabolismo
-
-    if (sexo === "masculino") {
-      metabolismo =
-        10 * pesoNum +
-        6.25 * alturaNum -
-        5 * idadeNum +
-        5
-    } else {
-      metabolismo =
-        10 * pesoNum +
-        6.25 * alturaNum -
-        5 * idadeNum -
-        161
-    }
-
-    setTmb(metabolismo)
-
-    let fatorAtividade = 1.2
-
-    if (atividade === "leve") fatorAtividade = 1.375
-    if (atividade === "moderado") fatorAtividade = 1.55
-    if (atividade === "alto") fatorAtividade = 1.725
-    if (atividade === "muito_alto") fatorAtividade = 1.9
-
-    const gastoDiario = metabolismo * fatorAtividade
-
-    setTdee(gastoDiario)
-
-    let caloriasFinais = gastoDiario
-
-    if (objetivo === "emagrecer") {
-      caloriasFinais = gastoDiario - 400
-    }
-
-    if (objetivo === "ganhar_massa") {
-      caloriasFinais = gastoDiario + 400
-    }
-
-    setCaloriasObjetivo(caloriasFinais)
-
-  }, [])
-
-  function continuar() {
     navigate("/criar-conta")
   }
 

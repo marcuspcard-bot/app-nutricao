@@ -1,0 +1,272 @@
+:root {
+  --bg-main: #f4f7f2;
+  --bg-surface: #ffffff;
+  --text-main: #1a2a1f;
+  --text-muted: #5b6b61;
+  --line-soft: #d8e3da;
+  --brand: #1b8f5a;
+  --brand-strong: #0f6b42;
+  --accent: #ffb545;
+  --danger: #b44545;
+  --shadow-soft: 0 14px 34px rgba(22, 52, 35, 0.12);
+}
+
+.app-mobile-shell {
+  max-width: 430px;
+  margin: 0 auto;
+  min-height: 100dvh;
+  padding: 20px 16px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hero-card {
+  border-radius: 24px;
+  padding: 18px;
+  background: linear-gradient(148deg, #f7fff8 0%, #e4f4e9 100%);
+  border: 1px solid #d3eadb;
+  box-shadow: var(--shadow-soft);
+}
+
+.hero-dash {
+  background: radial-gradient(circle at 12% 22%, #d6f5df 0%, #f6fff8 48%, #edf9f1 100%);
+}
+
+.eyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.68rem;
+  color: var(--brand-strong);
+  font-weight: 700;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1 {
+  margin-top: 8px;
+  color: var(--text-main);
+  font-size: 1.45rem;
+  line-height: 1.2;
+}
+
+h2 {
+  font-size: 1.02rem;
+  color: var(--text-main);
+}
+
+h3 {
+  color: var(--text-main);
+  font-size: 0.96rem;
+}
+
+.muted {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.chip-row {
+  margin-top: 14px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  background: #ecf6ef;
+  color: var(--brand-strong);
+  border: 1px solid #d0e7d8;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.chip-premium {
+  background: #fff4df;
+  border-color: #ffd28a;
+  color: #955b00;
+}
+
+.chip-free {
+  background: #eef2ef;
+  border-color: #d8dfd9;
+  color: #536058;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-card {
+  background: var(--bg-surface);
+  border-radius: 18px;
+  border: 1px solid var(--line-soft);
+  padding: 14px;
+}
+
+.metric-card p {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.metric-card strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-main);
+  font-size: 1.1rem;
+}
+
+.metric-highlight {
+  grid-column: 1 / -1;
+  background: linear-gradient(140deg, #e8f6ee, #f4fbf7);
+  border-color: #cae7d6;
+}
+
+.meal-block {
+  background: var(--bg-surface);
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.meal-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.meal-head span {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.profile-grid p {
+  background: #f8fbf8;
+  border: 1px solid #e1ebe3;
+  border-radius: 12px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.profile-grid strong {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.profile-grid span {
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+.primary-action,
+.ghost-action,
+.recipe-card {
+  border: 0;
+  cursor: pointer;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-weight: 700;
+  font-family: "Manrope", "Nunito Sans", "Trebuchet MS", sans-serif;
+}
+
+.primary-action {
+  background: linear-gradient(135deg, var(--brand), var(--brand-strong));
+  color: #fff;
+}
+
+.ghost-action {
+  background: #eef3ee;
+  color: #2f4737;
+  border: 1px solid #d3ddd5;
+}
+
+.inline-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.ghost-action.danger {
+  color: var(--danger);
+  border-color: #e4c2c2;
+  background: #f9eeee;
+}
+
+.recipe-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.recipe-card {
+  text-align: left;
+  background: #f7fbf8;
+  border: 1px solid #dce7de;
+}
+
+.recipe-card p {
+  margin-top: 6px;
+  color: var(--brand-strong);
+  font-weight: 800;
+}
+
+.recipe-card small {
+  margin-top: 4px;
+  color: var(--text-muted);
+}
+
+.ad-gate {
+  border-radius: 20px;
+  border: 1px solid #e7d8b6;
+  background: linear-gradient(145deg, #fff6df, #fffaf0);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ad-box {
+  border-radius: 12px;
+  border: 1px solid #eed39f;
+  background: #fff5df;
+  padding: 10px;
+}
+
+.list-clean {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-main);
+  display: grid;
+  gap: 8px;
+}
+
+.list-clean.ordered {
+  padding-left: 20px;
+}
+
+@media (max-width: 360px) {
+  .profile-grid {
+    grid-template-columns: 1fr;
+  }
+}

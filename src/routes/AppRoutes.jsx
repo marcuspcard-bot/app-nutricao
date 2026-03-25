@@ -4,9 +4,9 @@ import Home from "../pages/home/Home"
 import Login from "../pages/auth/Login"
 import Termos from "../pages/onboarding/Termos"
 import Nome from "../pages/onboarding/Nome"
-import DadosFisicos from "../pages/onboarding/DadosFisicos"
-import Preferencias from "../pages/onboarding/Preferencias"
 import Dashboard from "../pages/app/Dashboard"
+import MealPlans from "../pages/app/MealPlans"
+import RecipeDetails from "../pages/app/RecipeDetails"
 import Altura from "../pages/onboarding/Altura"
 import CalculoMetabolico from "../pages/onboarding/CalculoMetabolico"
 import Idade from "../pages/onboarding/Idade"
@@ -15,12 +15,12 @@ import Sexo from "../pages/onboarding/Sexo"
 import NivelAtividade from "../pages/onboarding/NivelAtividade"
 import Objetivo from "../pages/onboarding/Objetivo"
 import CriarConta from "../pages/auth/CriarConta"
+import ProtectedRoute from "./ProtectedRoute"
 
 function AppRoutes() {
   return (
     <BrowserRouter>
       <Routes>
-
         <Route path="/" element={<Home />} />
 
         <Route path="/login" element={<Login />} />
@@ -29,11 +29,32 @@ function AppRoutes() {
 
         <Route path="/nome" element={<Nome />} />
 
-        <Route path="/dados" element={<DadosFisicos />} />
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          }
+        />
 
-        <Route path="/preferencias" element={<Preferencias />} />
+        <Route
+          path="/cardapios"
+          element={
+            <ProtectedRoute>
+              <MealPlans />
+            </ProtectedRoute>
+          }
+        />
 
-        <Route path="/dashboard" element={<Dashboard />} />
+        <Route
+          path="/receitas/:recipeId"
+          element={
+            <ProtectedRoute>
+              <RecipeDetails />
+            </ProtectedRoute>
+          }
+        />
 
         <Route path="/altura" element={<Altura />} />
 
@@ -50,7 +71,6 @@ function AppRoutes() {
         <Route path="/atividade" element={<NivelAtividade />} />
 
         <Route path="/criar-conta" element={<CriarConta />} />
-
       </Routes>
     </BrowserRouter>
   )
