@@ -5,6 +5,16 @@ import { getRecipeFromSupabase } from "../../lib/mealPlansService"
 import { useUserStore } from "../../store/userStore"
 import "./nutritionApp.css"
 
+function getRecipeHeroBackground(imageUrl) {
+  if (!imageUrl) return undefined
+
+  return {
+    backgroundImage: `linear-gradient(180deg, rgba(8, 14, 10, 0.06) 0%, rgba(8, 14, 10, 0.76) 100%), url("${imageUrl}")`,
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+  }
+}
+
 function RecipeDetailsView({ recipeId }) {
   const navigate = useNavigate()
 
@@ -107,13 +117,15 @@ function RecipeDetailsView({ recipeId }) {
 
   return (
     <main className="app-mobile-shell">
-      <section className="hero-card">
-        <p className="eyebrow">Receita</p>
-        <h1>{receita.titulo}</h1>
-        <p className="muted">{receita.calorias} kcal • {receita.proteina} proteina • {receita.tempo}</p>
+      <section className="hero-card recipe-hero" style={getRecipeHeroBackground(receita.imageUrl)}>
+        <div className="recipe-hero-content">
+          <p className="eyebrow">Receita</p>
+          <h1>{receita.titulo}</h1>
+          <p className="muted">{receita.calorias} kcal • {receita.proteina} proteina • {receita.tempo}</p>
 
-        <div className="chip-row">
-          <span className="chip">Fonte: {source === "supabase" ? "Supabase" : "Fallback local"}</span>
+          <div className="chip-row">
+            <span className="chip">Fonte: {source === "supabase" ? "Supabase" : "Fallback local"}</span>
+          </div>
         </div>
       </section>
 

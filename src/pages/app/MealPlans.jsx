@@ -5,6 +5,16 @@ import { getMealPlanFromSupabase } from "../../lib/mealPlansService"
 import { useUserStore } from "../../store/userStore"
 import "./nutritionApp.css"
 
+function getRecipeCardBackground(imageUrl) {
+  if (!imageUrl) return undefined
+
+  return {
+    backgroundImage: `linear-gradient(180deg, rgba(8, 15, 10, 0.14) 0%, rgba(8, 15, 10, 0.74) 100%), url("${imageUrl}")`,
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+  }
+}
+
 function MealPlans() {
   const navigate = useNavigate()
 
@@ -15,6 +25,7 @@ function MealPlans() {
   const [plano, setPlano] = useState(fallbackPlan)
   const [source, setSource] = useState("local")
   const [loading, setLoading] = useState(true)
+  const [feedback, setFeedback] = useState("")
 
   const objetivoLabel = objetivoLabels[objetivo] ?? objetivoLabels.manter
 
@@ -25,14 +36,19 @@ function MealPlans() {
       setLoading(true)
       setPlano(fallbackPlan)
       setSource("local")
+      setFeedback("")
 
-      const { plan } = await getMealPlanFromSupabase(objetivo)
+      const { plan, error } = await getMealPlanFromSupabase(objetivo)
 
       if (!isMounted) return
 
       if (plan) {
         setPlano(plan)
         setSource("supabase")
+      } else if (error) {
+        setFeedback(`Supabase indisponivel: ${error.message}`)
+      } else {
+        setFeedback("Sem receitas cadastradas no Supabase para essa meta. Exibindo fallback local.")
       }
 
       setLoading(false)
@@ -58,6 +74,8 @@ function MealPlans() {
           <span className="chip">Fonte: {source === "supabase" ? "Supabase" : "Fallback local"}</span>
           {loading && <span className="chip chip-free">Atualizando...</span>}
         </div>
+
+        {feedback && <p className="muted muted-warning">{feedback}</p>}
       </section>
 
       {mealEntries.map(([mealKey, receitas]) => (
@@ -71,13 +89,16 @@ function MealPlans() {
             {receitas.length === 0 && <p className="muted">Sem receitas nesta refeicao.</p>}
             {receitas.map((receita) => (
               <button
-                className="recipe-card"
+                className="recipe-card recipe-card-visual"
                 key={receita.id}
                 onClick={() => navigate(`/receitas/${receita.id}`)}
+                style={getRecipeCardBackground(receita.imageUrl)}
               >
-                <h3>{receita.titulo}</h3>
-                <p>{receita.calorias} kcal</p>
-                <small>{receita.proteina} proteina • {receita.tempo}</small>
+                <div className="recipe-card-content">
+                  <h3>{receita.titulo}</h3>
+                  <p>{receita.calorias} kcal</p>
+                  <small>{receita.proteina} proteina • {receita.tempo}</small>
+                </div>
               </button>
             ))}
           </div>
