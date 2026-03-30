@@ -1,26 +1,28 @@
 import { Link } from "react-router-dom"
+import EntryShell from "../../components/EntryShell"
 
 function Home() {
   return (
-    <div>
-
-      <h1>App Nutrição</h1>
-
-      <p>Seja bem-vindo!</p>
-
-      <div>
-
+    <EntryShell
+      eyebrow="Nutrição inteligente"
+      title="Painel nutricional com presenca e clareza"
+      description="Organize sua alimentacao, acompanhe sua evolucao e monte suas refeicoes em uma experiencia mais clara e segura."
+      footer="Escolha como deseja começar e siga com uma jornada mais organizada desde o primeiro acesso."
+      highlights={[
+        { title: "Check-ins semanais", description: "Peso e historico reunidos em um acompanhamento simples." },
+        { title: "Cardapios por refeicao", description: "Receitas distribuidas por momento do dia e objetivo." },
+      ]}
+    >
+      <div className="entry-actions">
         <Link to="/termos">
-          <button>Novo usuário</button>
+          <button className="entry-primary">Iniciar novo acompanhamento</button>
         </Link>
 
         <Link to="/login">
-          <button>Já tenho conta</button>
+          <button className="entry-secondary">Acessar minha conta</button>
         </Link>
-
       </div>
-
-    </div>
+    </EntryShell>
   )
 }
 

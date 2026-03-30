@@ -1,45 +1,48 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useUserStore } from "../../store/userStore"
+import EntryShell from "../../components/EntryShell"
 
 function Peso() {
-
   const [pesoInput, setPesoInput] = useState("")
+  const [erro, setErro] = useState("")
   const setPeso = useUserStore((state) => state.setPeso)
 
   const navigate = useNavigate()
 
   function continuar() {
-
     if (!pesoInput) {
-      alert("Digite seu peso")
+      setErro("Informe o peso atual para continuar.")
       return
     }
-
+    setErro("")
     setPeso(pesoInput)
-
     navigate("/altura")
   }
 
   return (
-    <div>
+    <EntryShell
+      step={3}
+      totalSteps={7}
+      title="Qual é o peso atual?"
+      description="Esse dado ajuda a compor a base metabolica e sera o primeiro marco da evolucao."
+    >
+      <label className="entry-field">
+        <span>Peso em kg</span>
+        <input
+          type="number"
+          placeholder="Ex: 72.4"
+          value={pesoInput}
+          onChange={(e) => setPesoInput(e.target.value)}
+        />
+      </label>
 
-      <h1>Qual é seu peso?</h1>
+      {erro && <p className="entry-feedback entry-feedback-error">{erro}</p>}
 
-      <input
-        type="number"
-        placeholder="Peso em kg"
-        value={pesoInput}
-        onChange={(e) => setPesoInput(e.target.value)}
-      />
-
-      <br /><br />
-
-      <button onClick={continuar}>
+      <button className="entry-primary" onClick={continuar}>
         Continuar
       </button>
-
-    </div>
+    </EntryShell>
   )
 }
 

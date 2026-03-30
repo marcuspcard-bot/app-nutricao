@@ -1,8 +1,21 @@
-import { mealLabels } from "../data/mealPlans"
+import { enrichRecipe, mealLabels } from "../data/mealPlans"
 import { hasSupabaseConfig, supabase } from "./supabaseClient"
 
+function getRecipeColumns(options = {}) {
+  const columns = ["id", "titulo", "objetivo", "refeicao", "calorias", "proteina_g", "tempo_preparo_min", "is_premium"]
+
+  if (options.includeImageUrl) columns.push("image_url")
+  if (options.includeCategorias) columns.push("categorias")
+
+  return columns.join(", ")
+}
+
+function shouldRetryWithoutColumn(error, columnName) {
+  return Boolean(error?.message?.includes(columnName))
+}
+
 function toRecipeSummary(row) {
-  return {
+  return enrichRecipe({
     id: row.id,
     titulo: row.titulo,
     calorias: row.calorias,
@@ -10,7 +23,9 @@ function toRecipeSummary(row) {
     tempo: `${Number(row.tempo_preparo_min ?? 0)} min`,
     isPremium: Boolean(row.is_premium),
     imageUrl: row.image_url ?? "",
-  }
+    ingredientes: row.ingredientes ?? [],
+    categorias: Array.isArray(row.categorias) ? row.categorias : [],
+  })
 }
 
 function withAllMeals(plan) {
@@ -23,14 +38,10 @@ function withAllMeals(plan) {
   return normalized
 }
 
-async function fetchMealPlan(objetivo, includeImageUrl = true) {
-  const columns = includeImageUrl
-    ? "id, titulo, objetivo, refeicao, calorias, proteina_g, tempo_preparo_min, is_premium, image_url"
-    : "id, titulo, objetivo, refeicao, calorias, proteina_g, tempo_preparo_min, is_premium"
-
+async function fetchMealPlan(objetivo, options = {}) {
   return supabase
     .from("receitas")
-    .select(columns)
+    .select(getRecipeColumns(options))
     .eq("objetivo", objetivo)
     .eq("ativo", true)
     .order("refeicao", { ascending: true })
@@ -40,10 +51,19 @@ async function fetchMealPlan(objetivo, includeImageUrl = true) {
 export async function getMealPlanFromSupabase(objetivo) {
   if (!hasSupabaseConfig || !supabase) return { plan: null, error: null }
 
-  let { data, error } = await fetchMealPlan(objetivo, true)
+  let options = { includeImageUrl: true, includeCategorias: true }
+  let { data, error } = await fetchMealPlan(objetivo, options)
 
-  if (error?.message?.includes("image_url")) {
-    const retry = await fetchMealPlan(objetivo, false)
+  if (shouldRetryWithoutColumn(error, "categorias")) {
+    options = { ...options, includeCategorias: false }
+    const retry = await fetchMealPlan(objetivo, options)
+    data = retry.data
+    error = retry.error
+  }
+
+  if (shouldRetryWithoutColumn(error, "image_url")) {
+    options = { ...options, includeImageUrl: false }
+    const retry = await fetchMealPlan(objetivo, options)
     data = retry.data
     error = retry.error
   }
@@ -52,10 +72,30 @@ export async function getMealPlanFromSupabase(objetivo) {
 
   if (!data || data.length === 0) return { plan: null, error: null }
 
+  const recipeIds = data.map((item) => item.id)
+  const { data: ingredientRows, error: ingredientError } = await supabase
+    .from("receita_ingredientes")
+    .select("receita_id, descricao, ordem")
+    .in("receita_id", recipeIds)
+    .order("ordem", { ascending: true })
+
+  if (ingredientError) return { plan: null, error: ingredientError }
+
+  const ingredientsByRecipeId = (ingredientRows ?? []).reduce((acc, row) => {
+    if (!acc[row.receita_id]) acc[row.receita_id] = []
+    acc[row.receita_id].push(row.descricao)
+    return acc
+  }, {})
+
   const grouped = data.reduce((acc, row) => {
     const mealKey = row.refeicao
     if (!acc[mealKey]) acc[mealKey] = []
-    acc[mealKey].push(toRecipeSummary(row))
+    acc[mealKey].push(
+      toRecipeSummary({
+        ...row,
+        ingredientes: ingredientsByRecipeId[row.id] ?? [],
+      }),
+    )
     return acc
   }, {})
 
@@ -65,12 +105,39 @@ export async function getMealPlanFromSupabase(objetivo) {
 export async function getRecipeFromSupabase(recipeId) {
   if (!hasSupabaseConfig || !supabase) return { recipe: null, error: null }
 
-  const { data: receita, error: receitaError } = await supabase
+  let columns = "id, titulo, calorias, proteina_g, tempo_preparo_min, is_premium, image_url, categorias"
+  let { data: receita, error: receitaError } = await supabase
     .from("receitas")
-    .select("id, titulo, calorias, proteina_g, tempo_preparo_min, is_premium, image_url")
+    .select(columns)
     .eq("id", recipeId)
     .eq("ativo", true)
     .maybeSingle()
+
+  if (shouldRetryWithoutColumn(receitaError, "categorias")) {
+    columns = "id, titulo, calorias, proteina_g, tempo_preparo_min, is_premium, image_url"
+    const retry = await supabase
+      .from("receitas")
+      .select(columns)
+      .eq("id", recipeId)
+      .eq("ativo", true)
+      .maybeSingle()
+
+    receita = retry.data
+    receitaError = retry.error
+  }
+
+  if (shouldRetryWithoutColumn(receitaError, "image_url")) {
+    columns = "id, titulo, calorias, proteina_g, tempo_preparo_min, is_premium"
+    const retry = await supabase
+      .from("receitas")
+      .select(columns)
+      .eq("id", recipeId)
+      .eq("ativo", true)
+      .maybeSingle()
+
+    receita = retry.data
+    receitaError = retry.error
+  }
 
   if (receitaError) return { recipe: null, error: receitaError }
 
@@ -93,7 +160,7 @@ export async function getRecipeFromSupabase(recipeId) {
   if (preparoResult.error) return { recipe: null, error: preparoResult.error }
 
   return {
-    recipe: {
+    recipe: enrichRecipe({
       id: receita.id,
       titulo: receita.titulo,
       calorias: receita.calorias,
@@ -101,9 +168,10 @@ export async function getRecipeFromSupabase(recipeId) {
       tempo: `${Number(receita.tempo_preparo_min ?? 0)} min`,
       isPremium: Boolean(receita.is_premium),
       imageUrl: receita.image_url ?? "",
+      categorias: Array.isArray(receita.categorias) ? receita.categorias : [],
       ingredientes: (ingredientesResult.data ?? []).map((item) => item.descricao),
       preparo: (preparoResult.data ?? []).map((item) => item.passo),
-    },
+    }),
     error: null,
   }
 }

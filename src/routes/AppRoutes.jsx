@@ -5,6 +5,12 @@ import Login from "../pages/auth/Login"
 import Termos from "../pages/onboarding/Termos"
 import Nome from "../pages/onboarding/Nome"
 import Dashboard from "../pages/app/Dashboard"
+import AppLayout from "../pages/app/AppLayout"
+import AppHome from "../pages/app/AppHome"
+import WeeklyCheckin from "../pages/app/WeeklyCheckin"
+import Evolution from "../pages/app/Evolution"
+import MealsOverview from "../pages/app/MealsOverview"
+import ComingSoon from "../pages/app/ComingSoon"
 import MealPlans from "../pages/app/MealPlans"
 import RecipeDetails from "../pages/app/RecipeDetails"
 import Altura from "../pages/onboarding/Altura"
@@ -39,7 +45,90 @@ function AppRoutes() {
         />
 
         <Route
+          path="/app"
+          element={
+            <ProtectedRoute>
+              <AppLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<AppHome />} />
+          <Route
+            path="comunidade"
+            element={
+              <ComingSoon
+                title="Comunidade"
+                description="Espaco pensado para troca de experiencias, motivacao e interacao entre pessoas que usam o app."
+                bullets={["Feed da comunidade", "Publicacoes e comentarios", "Trocas sobre rotina e resultados"]}
+              />
+            }
+          />
+          <Route path="checkin" element={<WeeklyCheckin />} />
+          <Route path="evolucao" element={<Evolution />} />
+          <Route path="refeicoes" element={<MealsOverview />} />
+          <Route
+            path="premium"
+            element={
+              <ComingSoon
+                title="Premium"
+                description="Area reservada para assinatura do aplicativo, comparativo de planos e beneficios extras."
+                bullets={["Planos e assinatura", "Beneficios premium", "Gestao do acesso"]}
+              />
+            }
+          />
+          <Route
+            path="metas"
+            element={
+              <ComingSoon
+                title="Metas"
+                description="Espaco reservado para metas pessoais, marcos e proximos objetivos."
+                bullets={["Metas de peso", "Objetivos por fase", "Marcos da sua jornada"]}
+              />
+            }
+          />
+          <Route
+            path="suplementacao"
+            element={
+              <ComingSoon
+                title="Suplementacao"
+                description="Area reservada para protocolos, horarios e observacoes."
+                bullets={["Protocolos ativos", "Horarios e lembretes", "Ajustes por objetivo"]}
+              />
+            }
+          />
+          <Route
+            path="agenda"
+            element={
+              <ComingSoon
+                title="Rotina"
+                description="Espaco para organizar sua semana, seus lembretes e seus compromissos."
+                bullets={["Planejamento da semana", "Lembretes pessoais", "Organizacao do dia"]}
+              />
+            }
+          />
+          <Route
+            path="configuracoes"
+            element={
+              <ComingSoon
+                title="Configuracoes"
+                description="Area pronta para preferências, planos e personalizacao futura."
+                bullets={["Preferencias da conta", "Assinatura e plano", "Ajustes do sistema"]}
+              />
+            }
+          />
+        </Route>
+
+        <Route
           path="/cardapios"
+          element={
+            <ProtectedRoute>
+              <MealPlans />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/cardapios/:mealKey"
           element={
             <ProtectedRoute>
               <MealPlans />

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { hasSupabaseConfig, supabase } from "../../lib/supabaseClient"
 import { upsertPerfil } from "../../lib/profileService"
 import { useUserStore } from "../../store/userStore"
+import EntryShell from "../../components/EntryShell"
 
 function CriarConta() {
   const navigate = useNavigate()
@@ -18,7 +19,7 @@ function CriarConta() {
 
     if (!hasSupabaseConfig || !supabase) {
       setErro(
-        "Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY (ou VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY).",
+        "Conexao com o Supabase nao configurada. Revise as variaveis de ambiente para continuar.",
       )
       return
     }
@@ -35,7 +36,7 @@ function CriarConta() {
     setLoading(false)
 
     if (error) {
-      setErro(error.message)
+      setErro("Nao foi possivel criar sua conta agora. Tente novamente em instantes.")
       return
     }
 
@@ -47,13 +48,13 @@ function CriarConta() {
       return
     }
 
-    setMensagem("Conta criada. Confira seu email para confirmar cadastro.")
+    setMensagem("Conta criada com sucesso. Verifique seu email para confirmar o cadastro.")
   }
 
   async function entrarComGoogle() {
     if (!hasSupabaseConfig || !supabase) {
       setErro(
-        "Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY (ou VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY).",
+        "Conexao com o Supabase nao configurada. Revise as variaveis de ambiente para continuar.",
       )
       return
     }
@@ -67,55 +68,58 @@ function CriarConta() {
     })
 
     if (error) {
-      setErro(error.message)
+      setErro("Nao foi possivel iniciar o cadastro com Google agora.")
     }
   }
 
   return (
-    <div>
-      <h1>Crie sua conta</h1>
+    <EntryShell
+      eyebrow="Cadastro"
+      title="Crie sua conta profissional"
+      description="Finalize seu acesso para salvar seus dados, sua evolucao e seus cardapios com continuidade e seguranca."
+      footer="Depois do cadastro, o painel passa a manter sua jornada sincronizada e pronta para acompanhamento."
+      highlights={[
+        { title: "Perfil salvo", description: "Suas informacoes iniciais ficam conectadas a sua conta." },
+        { title: "Continuidade do plano", description: "Retome sua rotina sem perder o progresso registrado." },
+      ]}
+    >
+      <form className="entry-actions" onSubmit={criarConta}>
+        <label className="entry-field">
+          <span>Email</span>
+          <input
+            type="email"
+            placeholder="voce@exemplo.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+        </label>
 
-      <form onSubmit={criarConta}>
-        <input
-          type="email"
-          placeholder="Seu email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
+        <label className="entry-field">
+          <span>Senha</span>
+          <input
+            type="password"
+            placeholder="Crie uma senha com pelo menos 6 caracteres"
+            value={senha}
+            onChange={(e) => setSenha(e.target.value)}
+            minLength={6}
+            required
+          />
+        </label>
 
-        <br />
-        <br />
+        {erro && <p className="entry-feedback entry-feedback-error">{erro}</p>}
+        {mensagem && <p className="entry-feedback entry-feedback-success">{mensagem}</p>}
 
-        <input
-          type="password"
-          placeholder="Sua senha"
-          value={senha}
-          onChange={(e) => setSenha(e.target.value)}
-          minLength={6}
-          required
-        />
-
-        <br />
-        <br />
-
-        <button type="submit" disabled={loading}>
+        <button className="entry-primary" type="submit" disabled={loading}>
           {loading ? "Criando conta..." : "Criar conta"}
         </button>
       </form>
 
-      <br />
-
-      <button onClick={entrarComGoogle}>Entrar com Google</button>
-
-      <br />
-      <br />
-
-      <button onClick={() => navigate("/login")}>Já tenho conta</button>
-
-      {erro && <p style={{ color: "crimson" }}>{erro}</p>}
-      {mensagem && <p style={{ color: "green" }}>{mensagem}</p>}
-    </div>
+      <div className="entry-actions">
+        <button className="entry-secondary" onClick={entrarComGoogle}>Continuar com Google</button>
+        <button className="entry-secondary" onClick={() => navigate("/login")}>Voltar para login</button>
+      </div>
+    </EntryShell>
   )
 }
 

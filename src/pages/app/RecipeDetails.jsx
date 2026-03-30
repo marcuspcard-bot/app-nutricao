@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useLocation, useNavigate, useParams } from "react-router-dom"
 import { getRecipeById } from "../../data/mealPlans"
 import { getRecipeFromSupabase } from "../../lib/mealPlansService"
 import { useUserStore } from "../../store/userStore"
+import BottomNav from "./components/BottomNav"
+import EmptyStateCard from "./components/EmptyStateCard"
+import StatusCard from "./components/StatusCard"
 import "./nutritionApp.css"
 
 function getRecipeHeroBackground(imageUrl) {
@@ -17,6 +20,7 @@ function getRecipeHeroBackground(imageUrl) {
 
 function RecipeDetailsView({ recipeId }) {
   const navigate = useNavigate()
+  const location = useLocation()
 
   const isPremium = useUserStore((state) => state.isPremium)
   const fallbackRecipe = useMemo(() => getRecipeById(recipeId), [recipeId])
@@ -24,6 +28,7 @@ function RecipeDetailsView({ recipeId }) {
   const [receita, setReceita] = useState(fallbackRecipe)
   const [source, setSource] = useState(fallbackRecipe ? "local" : "none")
   const [loading, setLoading] = useState(true)
+  const [feedback, setFeedback] = useState("")
   const [adTimer, setAdTimer] = useState(isPremium ? 0 : 6)
   const [adLiberado, setAdLiberado] = useState(isPremium)
 
@@ -34,14 +39,17 @@ function RecipeDetailsView({ recipeId }) {
       setLoading(true)
       setReceita(fallbackRecipe)
       setSource(fallbackRecipe ? "local" : "none")
+      setFeedback("")
 
-      const { recipe } = await getRecipeFromSupabase(recipeId)
+      const { recipe, error } = await getRecipeFromSupabase(recipeId)
 
       if (!isMounted) return
 
       if (recipe) {
         setReceita(recipe)
         setSource("supabase")
+      } else if (error) {
+        setFeedback(`Supabase indisponivel: ${error.message}`)
       }
 
       setLoading(false)
@@ -73,10 +81,11 @@ function RecipeDetailsView({ recipeId }) {
   if (loading) {
     return (
       <main className="app-mobile-shell">
-        <section className="hero-card">
-          <p className="eyebrow">Carregando receita</p>
-          <h1>Aguarde...</h1>
-        </section>
+        <StatusCard
+          eyebrow="Sincronizando"
+          title="Carregando receita"
+          description="Estamos preparando os detalhes desta receita para voce."
+        />
       </main>
     )
   }
@@ -84,10 +93,12 @@ function RecipeDetailsView({ recipeId }) {
   if (!receita) {
     return (
       <main className="app-mobile-shell">
-        <section className="hero-card">
-          <h1>Receita nao encontrada</h1>
-          <button className="primary-action" onClick={() => navigate("/cardapios")}>Voltar para cardapios</button>
-        </section>
+        <EmptyStateCard
+          title="Receita nao encontrada"
+          description="Essa receita nao esta mais disponivel ou ainda nao foi sincronizada."
+          actionLabel="Voltar para cardapios"
+          onAction={() => navigate("/cardapios")}
+        />
       </main>
     )
   }
@@ -119,18 +130,27 @@ function RecipeDetailsView({ recipeId }) {
     <main className="app-mobile-shell">
       <section className="hero-card recipe-hero" style={getRecipeHeroBackground(receita.imageUrl)}>
         <div className="recipe-hero-content">
-          <p className="eyebrow">Receita</p>
+          <p className="eyebrow">Receita selecionada</p>
           <h1>{receita.titulo}</h1>
-          <p className="muted">{receita.calorias} kcal • {receita.proteina} proteina • {receita.tempo}</p>
+          <p className="muted">{receita.calorias} kcal • {receita.proteina} de proteina • {receita.tempo}</p>
 
           <div className="chip-row">
             <span className="chip">Fonte: {source === "supabase" ? "Supabase" : "Fallback local"}</span>
+            {loading && <span className="chip chip-free">Atualizando...</span>}
           </div>
+
+          {feedback && (
+            <StatusCard
+              tone="warning"
+              title="Receita exibida com dados locais"
+              description={feedback}
+            />
+          )}
         </div>
       </section>
 
       <section className="meal-block">
-        <h2>Ingredientes</h2>
+        <h2>Ingredientes da receita</h2>
         <ul className="list-clean">
           {receita.ingredientes.map((item) => (
             <li key={item}>{item}</li>
@@ -147,7 +167,14 @@ function RecipeDetailsView({ recipeId }) {
         </ol>
       </section>
 
-      <button className="ghost-action" onClick={() => navigate("/cardapios")}>Voltar aos cardapios</button>
+      <button
+        className="ghost-action"
+        onClick={() => navigate(location.state?.backTo || "/cardapios")}
+      >
+        {location.state?.backLabel ? `Voltar para ${location.state.backLabel}` : "Voltar aos cardapios"}
+      </button>
+
+      <BottomNav />
     </main>
   )
 }

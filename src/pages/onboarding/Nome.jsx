@@ -1,45 +1,49 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useUserStore } from "../../store/userStore"
+import EntryShell from "../../components/EntryShell"
 
 function Nome() {
-
   const [nome, setNomeInput] = useState("")
+  const [erro, setErro] = useState("")
   const setNome = useUserStore((state) => state.setNome)
 
   const navigate = useNavigate()
 
   function continuar() {
-
-    if (!nome) {
-      alert("Digite seu nome")
+    if (!nome.trim()) {
+      setErro("Informe seu nome para continuar.")
       return
     }
 
-    setNome(nome)
-
+    setErro("")
+    setNome(nome.trim())
     navigate("/idade")
   }
 
   return (
-    <div>
+    <EntryShell
+      step={1}
+      totalSteps={7}
+      title="Como voce gostaria de se identificar?"
+      description="Esse nome sera usado para personalizar o painel e deixar sua jornada mais clara."
+    >
+      <label className="entry-field">
+        <span>Nome</span>
+        <input
+          type="text"
+          placeholder="Digite o nome"
+          value={nome}
+          onChange={(e) => setNomeInput(e.target.value)}
+        />
+      </label>
 
-      <h1>Qual é o seu nome?</h1>
+      {erro && <p className="entry-feedback entry-feedback-error">{erro}</p>}
 
-      <input
-        type="text"
-        placeholder="Digite seu nome"
-        value={nome}
-        onChange={(e) => setNomeInput(e.target.value)}
-      />
-
-      <br /><br />
-
-      <button onClick={continuar}>
+      <button className="entry-primary" onClick={continuar}>
         Continuar
       </button>
-
-    </div>
+    </EntryShell>
   )
 }
 

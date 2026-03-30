@@ -12,6 +12,56 @@ export const mealLabels = {
   jantar: "Jantar",
 }
 
+export const recipeCategoryOptions = [
+  { key: "rapido", label: "Rapido" },
+  { key: "economico", label: "Economico" },
+  { key: "pre_treino", label: "Pre-treino" },
+  { key: "pos_treino", label: "Pos-treino" },
+]
+
+function normalizeText(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+}
+
+function parseProtein(proteina) {
+  return Number(String(proteina ?? "").replace(/[^\d.]/g, "")) || 0
+}
+
+function parseTime(tempo) {
+  return Number(String(tempo ?? "").replace(/[^\d.]/g, "")) || 0
+}
+
+function inferCategories(recipe) {
+  const text = normalizeText(`${recipe.titulo} ${(recipe.ingredientes ?? []).join(" ")}`)
+  const categories = new Set(recipe.categorias ?? [])
+  const time = parseTime(recipe.tempo)
+  const calories = Number(recipe.calorias ?? 0)
+  const protein = parseProtein(recipe.proteina)
+
+  if (time > 0 && time <= 10) categories.add("rapido")
+  if (calories > 0 && calories <= 350) categories.add("economico")
+  if (text.includes("banana") || text.includes("aveia") || text.includes("pao") || text.includes("tapioca")) {
+    categories.add("pre_treino")
+  }
+  if (text.includes("whey") || text.includes("frango") || text.includes("iogurte") || protein >= 25) {
+    categories.add("pos_treino")
+  }
+
+  return Array.from(categories)
+}
+
+export function enrichRecipe(recipe) {
+  return {
+    ...recipe,
+    proteinaNumero: parseProtein(recipe.proteina),
+    tempoMinutos: parseTime(recipe.tempo),
+    categorias: inferCategories(recipe),
+  }
+}
+
 const plans = {
   emagrecer: {
     cafe_da_manha: [
@@ -216,15 +266,24 @@ const plans = {
 }
 
 export function getPlanByObjective(objetivo) {
-  return plans[objetivo] ?? plans.manter
+  const plan = plans[objetivo] ?? plans.manter
+
+  return Object.fromEntries(
+    Object.entries(plan).map(([mealKey, recipes]) => [mealKey, recipes.map((recipe) => enrichRecipe(recipe))]),
+  )
 }
 
 export function getRecipeById(recipeId) {
   for (const objective of Object.values(plans)) {
     for (const recipes of Object.values(objective)) {
       const found = recipes.find((recipe) => recipe.id === recipeId)
-      if (found) return found
+      if (found) return enrichRecipe(found)
     }
   }
   return null
+}
+
+export function getRecipesByMealAndObjective(objetivo, mealKey) {
+  const plan = getPlanByObjective(objetivo)
+  return plan[mealKey] ?? []
 }

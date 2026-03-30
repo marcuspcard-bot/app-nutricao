@@ -1,8 +1,11 @@
 import { useNavigate } from "react-router-dom"
+import { useState } from "react"
 import { useUserStore } from "../../store/userStore"
+import EntryShell from "../../components/EntryShell"
 
 function CalculoMetabolico() {
   const navigate = useNavigate()
+  const [erro, setErro] = useState("")
 
   const nome = useUserStore((state) => state.nome)
   const idade = useUserStore((state) => state.idade)
@@ -12,6 +15,12 @@ function CalculoMetabolico() {
   const atividade = useUserStore((state) => state.atividade)
   const objetivo = useUserStore((state) => state.objetivo)
   const setCalculoMetabolico = useUserStore((state) => state.setCalculoMetabolico)
+  const objetivoTexto =
+    objetivo === "emagrecer"
+      ? "emagrecimento"
+      : objetivo === "ganhar_massa"
+        ? "ganho de massa"
+        : "manutencao"
 
   const pesoNum = Number(peso)
   const alturaNum = Number(altura)
@@ -41,11 +50,12 @@ function CalculoMetabolico() {
 
   function continuar() {
     if (!dadosCompletos) {
-      alert("Complete os dados do onboarding antes de continuar.")
+      setErro("Complete as etapas anteriores para gerar o resumo metabolico corretamente.")
       navigate("/nome")
       return
     }
 
+    setErro("")
     setCalculoMetabolico({
       tmb: Math.round(tmb),
       tdee: Math.round(tdee),
@@ -56,27 +66,37 @@ function CalculoMetabolico() {
   }
 
   return (
+    <EntryShell
+      eyebrow="Resumo metabolico"
+      title={`Base inicial de ${nome || "voce"}`}
+      description={`Com os dados preenchidos, ja temos uma estimativa inicial para orientar o plano de ${objetivoTexto}.`}
+      footer="No proximo passo, voce cria a conta para salvar sua base inicial e seguir com o painel completo."
+      highlights={[
+        { title: "TMB estimada", description: "Uma referencia inicial para entender o metabolismo basal." },
+        { title: "Direcao do plano", description: "Ajuste calorico inicial alinhado ao objetivo definido." },
+      ]}
+    >
+      <div className="entry-metric-grid">
+        <article className="entry-metric-card">
+          <span>TMB</span>
+          <strong>{Math.round(tmb)} kcal</strong>
+        </article>
+        <article className="entry-metric-card">
+          <span>Gasto diario</span>
+          <strong>{Math.round(tdee)} kcal</strong>
+        </article>
+        <article className="entry-metric-card">
+          <span>Meta inicial</span>
+          <strong>{Math.round(caloriasObjetivo)} kcal</strong>
+        </article>
+      </div>
 
-    <div>
+      {erro && <p className="entry-feedback entry-feedback-error">{erro}</p>}
 
-      <h1>Resultado metabólico</h1>
-
-      <h2>Olá, {nome}!</h2>
-
-      <p>Metabolismo basal: {Math.round(tmb)} kcal</p>
-
-      <p>Gasto diário estimado: {Math.round(tdee)} kcal</p>
-
-      <p>Calorias para seu objetivo: {Math.round(caloriasObjetivo)} kcal</p>
-
-      <br />
-
-      <button onClick={continuar}>
-        Próxima etapa
+      <button className="entry-primary" onClick={continuar}>
+        Criar conta e continuar
       </button>
-
-    </div>
-
+    </EntryShell>
   )
 }
 
