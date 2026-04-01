@@ -1,5 +1,6 @@
+import AsyncStorage from "@react-native-async-storage/async-storage"
 import { create } from "zustand"
-import { persist } from "zustand/middleware"
+import { createJSONStorage, persist } from "zustand/middleware"
 
 export const useUserStore = create(
   persist(
@@ -57,6 +58,7 @@ export const useUserStore = create(
     }),
     {
       name: "app-nutricao-user-store",
+      storage: createJSONStorage(() => AsyncStorage),
     },
   ),
 )

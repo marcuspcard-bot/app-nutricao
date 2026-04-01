@@ -1,19 +1,19 @@
-# App Nutrição
+# App Nutricao
 
-Aplicação web em React para onboarding nutricional com cálculo metabólico e autenticação.
+Aplicativo mobile em React Native com Expo para onboarding nutricional, acompanhamento de evolucao e autenticacao com Supabase.
 
 ## Stack
 
-- React 19 + Vite
-- React Router
-- Zustand (com persistência local)
+- React Native + Expo
+- React Navigation
+- Zustand com persistencia via AsyncStorage
 - Supabase Auth (email/senha e Google)
 
 ## Funcionalidades já implementadas
 
 - Fluxo de onboarding:
-  - Home -> Termos -> Nome -> Idade -> Peso -> Altura -> Sexo -> Atividade -> Objetivo -> Cálculo metabólico
-- Armazenamento dos dados do onboarding no Zustand com persistência (`localStorage`)
+  - Home -> Termos -> Nome -> Idade -> Peso -> Altura -> Sexo -> Atividade -> Objetivo -> Calculo metabolico
+- Armazenamento dos dados do onboarding no Zustand com persistencia em `AsyncStorage`
 - Cálculo de:
   - TMB (Mifflin-St Jeor)
   - TDEE (fator de atividade)
@@ -25,18 +25,28 @@ Aplicação web em React para onboarding nutricional com cálculo metabólico e 
 - Sincronização do onboarding com a tabela `public.perfis` no Supabase
 - Cardapios e receitas buscados do Supabase com fallback local automatico
 
-## Variáveis de ambiente
+## Variaveis de ambiente
 
-Crie um arquivo `.env` na raiz:
+Configure as variaveis para Expo:
 
 ```env
-VITE_SUPABASE_URL=https://SEU-PROJETO.supabase.co
-VITE_SUPABASE_ANON_KEY=SUA_CHAVE_ANON
+EXPO_PUBLIC_SUPABASE_URL=https://SEU-PROJETO.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=SUA_CHAVE_ANON
 # ou
-VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY=SUA_CHAVE_PUBLISHABLE
+EXPO_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY=SUA_CHAVE_PUBLISHABLE
 ```
 
 Sem essas variáveis, o app mostra mensagens de configuração nas telas de autenticação.
+
+## Google OAuth mobile
+
+Para login com Google no Expo + Supabase, libere o callback mobile abaixo no painel do Supabase Auth e tambem na configuracao do cliente Google:
+
+```txt
+appnutricao://auth/callback
+```
+
+Em ambiente de desenvolvimento com Expo, o app tambem pode gerar uma URL local de callback baseada no host atual. Se o login falhar no retorno, confira a mensagem exibida na tela e adicione o redirect informado ali na allow list do Supabase.
 
 ## Tabela esperada no Supabase
 
@@ -59,27 +69,32 @@ Se o Supabase estiver vazio ou indisponivel, o app usa fallback local de `src/da
 
 ```bash
 npm install
-npm run dev
+npm run start
+```
+
+Use tambem:
+
+```bash
+npm run android
+npm run ios
+npm run web
 ```
 
 ## Qualidade
 
 ```bash
 npm run lint
-npm run build
 ```
 
 ## Estrutura principal
 
 - `src/routes/AppRoutes.jsx`: rotas da aplicação
 - `src/store/userStore.js`: estado global do onboarding
-- `src/pages/onboarding/*`: telas do onboarding
-- `src/pages/auth/*`: autenticação
-- `src/pages/app/Dashboard.jsx`: painel do usuário
+- `src/mobile/screens/*`: telas publicas e autenticadas
+- `src/mobile/ui.jsx`: primitives visuais em React Native
+- `src/mobile/useAppData.js`: agregacao de dados do app autenticado
 - `src/lib/supabaseClient.js`: cliente Supabase
 
-## Próximos passos sugeridos
+## Observacao
 
-- Proteger rota `/dashboard` exigindo sessão ativa
-- Salvar onboarding no banco (Supabase) por usuário autenticado
-- Evoluir layout/UX (componentização, validação e feedback visual)
+O projeto agora esta organizado para rodar pelo fluxo mobile com Expo Go via `App.js` + React Navigation.

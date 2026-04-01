@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "App Nutricao",
+    "slug": "app-nutricao",
+    "scheme": "appnutricao",
+    "version": "1.0.0",
+    "icon": "./assets/icon-v2.png",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon-v2.png",
+        "backgroundColor": "#00000000"
+      },
+      "package": "com.anonymous.appnutricao"
+    },
+    "plugins": [
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Permita o acesso as fotos para publicar imagens das refeicoes na comunidade.",
+          "cameraPermission": "Permita o acesso a camera para fotografar suas refeicoes e publicar na comunidade."
+        }
+      ]
+    ]
+  }
+}
