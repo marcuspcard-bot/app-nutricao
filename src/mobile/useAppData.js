@@ -5,6 +5,12 @@ import { useUserStore } from "../store/userStore"
 import { getMealCardImages } from "../lib/mealCardImagesService"
 import { buildChartPoints, normalizeHistory } from "./appDataUtils"
 import { useSessionData } from "./useSessionData"
+import { fetchCachedResource } from "../lib/dataClient"
+import { readCachedResource, writeCachedResource } from "../lib/cacheClient"
+import { cacheKeys } from "../lib/cacheKeys"
+import { preloadCommunityFeed, preloadMealPlanResources } from "../lib/preloadService"
+
+const MEAL_CARD_IMAGES_MAX_AGE_MS = 12 * 60 * 60 * 1000
 
 export function useAppData() {
   const hoje = new Date().toLocaleDateString("pt-BR", {
@@ -30,6 +36,9 @@ export function useAppData() {
 
   const [history, setHistory] = useState([])
   const [mealCardImagesByKey, setMealCardImagesByKey] = useState({})
+  const [mealCardImagesLoading, setMealCardImagesLoading] = useState(true)
+  const [mealCardImagesRefreshing, setMealCardImagesRefreshing] = useState(false)
+  const [mealCardImagesStale, setMealCardImagesStale] = useState(false)
   const [savingCheckin, setSavingCheckin] = useState(false)
   const [checkinError, setCheckinError] = useState("")
   const {
@@ -39,9 +48,13 @@ export function useAppData() {
     profileLoaded,
     sessionLoading,
     checkinsLoading,
+    profileRefreshing,
+    checkinsRefreshing,
     sessionError,
     profileError,
     checkinsError,
+    profileStale,
+    checkinsStale,
     profileSyncing,
     syncPerfil,
   } = useSessionData(setPerfil)
@@ -51,7 +64,7 @@ export function useAppData() {
     return `Ola, ${nome}`
   }, [nome])
 
-  const objetivoLabel = objetivoLabels[objetivo] ?? "Nao definido"
+  const objetivoLabel = objetivoLabels[objetivo] ?? "Não definido"
   const caloriasCafe = caloriasObjetivo ? Math.round(caloriasObjetivo * 0.25) : 0
   const caloriasAlmoco = caloriasObjetivo ? Math.round(caloriasObjetivo * 0.35) : 0
   const caloriasJantar = caloriasObjetivo ? Math.round(caloriasObjetivo * 0.25) : 0
@@ -85,9 +98,33 @@ export function useAppData() {
     let isMounted = true
 
     async function loadMealCardImages() {
-      const { imagesByKey } = await getMealCardImages()
+      const cachedImages = await readCachedResource(cacheKeys.mealCardImages)
       if (!isMounted) return
-      setMealCardImagesByKey(imagesByKey)
+
+      if (cachedImages.exists && cachedImages.data) {
+        setMealCardImagesByKey(cachedImages.data)
+        setMealCardImagesLoading(false)
+      } else {
+        setMealCardImagesLoading(true)
+      }
+
+      setMealCardImagesRefreshing(true)
+      const result = await fetchCachedResource({
+        cacheKey: cacheKeys.mealCardImages,
+        label: "meal-images:load",
+        retries: 1,
+        maxAgeMs: MEAL_CARD_IMAGES_MAX_AGE_MS,
+        requestFn: () => getMealCardImages(),
+        getData: (response) => response.imagesByKey,
+        fallbackData: {},
+      })
+
+      if (!isMounted) return
+
+      setMealCardImagesByKey(result.data ?? {})
+      setMealCardImagesLoading(false)
+      setMealCardImagesRefreshing(false)
+      setMealCardImagesStale(result.isStale)
     }
 
     loadMealCardImages()
@@ -98,28 +135,15 @@ export function useAppData() {
   }, [])
 
   useEffect(() => {
-    if (!userId || !profileLoaded) return
+    if (!objetivo) return
 
-    syncPerfil(userId, useUserStore.getState())
-  }, [
-    profileLoaded,
-    syncPerfil,
-    userId,
-    nome,
-    idade,
-    peso,
-    altura,
-    sexo,
-    atividade,
-    objetivo,
-    tmb,
-    tdee,
-    caloriasObjetivo,
-  ])
+    preloadMealPlanResources(objetivo)
+    preloadCommunityFeed()
+  }, [objetivo])
 
   async function addWeeklyCheckin(checkinInput) {
     if (!userId) {
-      return { checkin: null, error: new Error("Usuario nao autenticado.") }
+      return { checkin: null, error: new Error("Usuário não autenticado.") }
     }
 
     setSavingCheckin(true)
@@ -132,13 +156,15 @@ export function useAppData() {
 
     if (error || !checkin) {
       setSavingCheckin(false)
-      setCheckinError("Nao foi possivel salvar o check-in no Supabase.")
+      setCheckinError("Não foi possível salvar o check-in no Supabase.")
       return { checkin: null, error }
     }
 
     const nextWeight = String(checkin.peso)
-    setHistory((current) => [...current, checkin])
+    const nextHistory = [...history, checkin]
+    setHistory(nextHistory)
     setPeso(nextWeight)
+    await writeCachedResource(cacheKeys.checkins(userId), nextHistory)
 
     await syncPerfil(userId, {
       ...useUserStore.getState(),
@@ -149,7 +175,10 @@ export function useAppData() {
     return { checkin, error: null }
   }
 
-  const dataLoading = sessionLoading || checkinsLoading
+  const initialAppReady = profileLoaded && !sessionLoading && !checkinsLoading && !mealCardImagesLoading
+  const dataLoading = sessionLoading || checkinsLoading || mealCardImagesLoading
+  const dataRefreshing = profileRefreshing || checkinsRefreshing || mealCardImagesRefreshing
+  const dataStale = profileStale || checkinsStale || mealCardImagesStale
   const dataError = [sessionError, profileError, checkinsError, checkinError].find(Boolean) ?? ""
 
   return {
@@ -171,6 +200,9 @@ export function useAppData() {
     balanceScore,
     meals,
     mealCardImagesByKey,
+    mealCardImagesLoading,
+    mealCardImagesRefreshing,
+    mealCardImagesStale,
     email,
     saudacao,
     objetivoLabel,
@@ -184,13 +216,21 @@ export function useAppData() {
     addWeeklyCheckin,
     sessionLoading,
     checkinsLoading,
+    profileRefreshing,
+    checkinsRefreshing,
     savingCheckin,
     sessionError,
     profileError,
     checkinsError,
     checkinError,
     profileSyncing,
+    profileStale,
+    checkinsStale,
+    profileLoaded,
+    initialAppReady,
     dataLoading,
+    dataRefreshing,
+    dataStale,
     dataError,
   }
 }

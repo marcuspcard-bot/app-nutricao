@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react"
-import { Image, ImageBackground, Pressable, StyleSheet, Text, View } from "react-native"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs"
+import { FlatList, Image, ImageBackground, LayoutAnimation, Modal, Pressable, StyleSheet, Text, UIManager, View } from "react-native"
 import * as ImagePicker from "expo-image-picker"
 import { LinearGradient } from "expo-linear-gradient"
 import Svg, { Circle, Line, Polyline } from "react-native-svg"
-import { Page, Button, Card, Chip, EmptyStateCard, InputField, MetricTile, ProgressBar, SectionHeader, StatusCard } from "../ui"
+import { Page, Button, Card, Chip, EmptyStateCard, InputField, MetricTile, ProgressBar, SectionHeader, StatusCard, SurfaceBox, SurfacePressable } from "../ui"
 import { colors, radius, spacing, typography } from "../theme"
 import { useAppDataContext } from "../AppDataContext"
+import AppLoadingScreen from "../../components/AppLoadingScreen"
 import { formatShortDate, getChartPointPosition } from "../appDataUtils"
 import { useCommunity } from "../useCommunity"
 import { useUserStore } from "../../store/userStore"
@@ -13,6 +15,26 @@ import { getPlanByObjective, getRecipeById, mealLabels, objetivoLabels, recipeCa
 import { getMealImageUrl } from "../../lib/mealCardImagesService"
 import { getMealPlanFromSupabase, getRecipeFromSupabase } from "../../lib/mealPlansService"
 import { hasSupabaseConfig, supabase } from "../../lib/supabaseClient"
+import { fetchCachedResource } from "../../lib/dataClient"
+import { readCachedResource } from "../../lib/cacheClient"
+import { cacheKeys } from "../../lib/cacheKeys"
+import { startMeasure, trackListRenderMetric } from "../../lib/performanceMonitor"
+import { useScreenPerformance } from "../useScreenPerformance"
+
+const MEAL_PLAN_MAX_AGE_MS = 30 * 60 * 1000
+const RECIPE_MAX_AGE_MS = 6 * 60 * 60 * 1000
+
+if (UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true)
+}
+
+function runSafeLayoutAnimation() {
+  if (!LayoutAnimation?.configureNext || !LayoutAnimation?.Presets?.easeInEaseOut) {
+    return
+  }
+
+  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+}
 
 function normalizeText(value) {
   return String(value ?? "")
@@ -34,6 +56,24 @@ function MetricGrid({ items }) {
 
 function HeroCard({ children, style }) {
   return <Card style={[styles.heroCard, style]}>{children}</Card>
+}
+
+function TabPage({ children, contentContainerStyle, ...props }) {
+  const tabBarHeight = useBottomTabBarHeight()
+
+  return (
+    <Page
+      {...props}
+      contentContainerStyle={[
+        {
+          paddingBottom: tabBarHeight + spacing.md,
+        },
+        contentContainerStyle,
+      ]}
+    >
+      {children}
+    </Page>
+  )
 }
 
 function MealProgressCard({ meal, totalCalories }) {
@@ -109,7 +149,212 @@ const communityMealOptions = [
   { key: "sobremesa_fit", label: "Sobremesa fit" },
 ]
 
+const premiumPlans = [
+  {
+    key: "monthly",
+    title: "Plano mensal",
+    price: "R$ 9,99",
+    period: "/mes",
+    headline: "Flexibilidade total para entrar agora",
+    highlight: "Ideal para testar o app com liberdade.",
+    ctaIdle: "Assinar mensal",
+    ctaActive: "Plano mensal ativo",
+    accent: ["#d7efe4", "#f6fbf8"],
+    savings: "",
+    features: [
+      "Receitas completas sem bloqueio por anuncio",
+      "Acesso premium liberado imediatamente",
+      "Troca simples para anual quando quiser",
+    ],
+  },
+  {
+    key: "yearly",
+    title: "Plano anual",
+    price: "R$ 39,99",
+    period: "/ano",
+    headline: "Melhor custo para manter constancia",
+    highlight: "Menor valor por periodo para quem quer seguir firme o ano todo.",
+    ctaIdle: "Assinar anual",
+    ctaActive: "Plano anual ativo",
+    accent: ["#214b39", "#326f56"],
+    savings: "Melhor oferta",
+    originalPrice: "R$ 119,88",
+    savingsPercent: "67%",
+    features: [
+      "Tudo do mensal com melhor custo-beneficio",
+      "Prioridade para novas funcionalidades premium",
+      "Planejamento continuo para toda a jornada",
+    ],
+  },
+]
+
+const premiumFaqItems = [
+  {
+    question: "Como funciona a cobranca?",
+    answer: "A assinatura pode ser cobrada pela App Store ou Google Play, conforme a plataforma usada no checkout.",
+  },
+  {
+    question: "Posso cancelar quando quiser?",
+    answer: "Sim. O cancelamento pode ser feito na loja da assinatura e o acesso segue ativo ate o fim do periodo ja pago.",
+  },
+  {
+    question: "O plano anual renova automaticamente?",
+    answer: "Sim, se a renovacao automatica estiver ativa na loja. Depois podemos ligar esse fluxo real ao sistema.",
+  },
+]
+
+function CommunityPostCard({
+  post,
+  currentUserId,
+  editingPostDraft,
+  likingPostId,
+  savingPostId,
+  editingPostId,
+  deletingPostId,
+  onToggleLike,
+  onOpenComments,
+  onToggleSave,
+  onStartEditingPost,
+  onUpdateEditingDraft,
+  onCancelEditingPost,
+  onSavePost,
+  onRemovePost,
+}) {
+  return (
+    <View style={styles.communityPost}>
+      <View style={styles.communityPostHeader}>
+        <View style={styles.communityAvatar}>
+          <Text style={styles.communityAvatarText}>{post.author.charAt(0).toUpperCase()}</Text>
+        </View>
+        <View style={styles.communityMeta}>
+          <Text style={styles.communityAuthor}>{post.author}</Text>
+          <Text style={styles.communityPostInfo}>{post.mealLabel} • {post.postedAt}</Text>
+        </View>
+        <View style={styles.communityPostMenu}>
+          <Text style={styles.communityPostMenuText}>•••</Text>
+        </View>
+      </View>
+      {editingPostDraft?.active ? (
+        <View style={styles.communityEditBox}>
+          <InputField
+            label="Legenda"
+            value={editingPostDraft.caption ?? ""}
+            onChangeText={(value) => onUpdateEditingDraft(post.id, { caption: value })}
+            placeholder="Legenda do post"
+          />
+          <InputField
+            label="Texto"
+            value={editingPostDraft.body ?? ""}
+            onChangeText={(value) => onUpdateEditingDraft(post.id, { body: value })}
+            placeholder="Texto do post"
+            multiline
+            numberOfLines={4}
+          />
+          <InputField
+            label="Link da imagem"
+            value={editingPostDraft.imageUrl ?? ""}
+            onChangeText={(value) => onUpdateEditingDraft(post.id, { imageUrl: value })}
+            placeholder="URL da imagem"
+            autoCapitalize="none"
+          />
+          <View style={styles.communityActions}>
+            <Button
+              label={editingPostId === post.id ? "Salvando..." : "Salvar alteracoes"}
+              variant="secondary"
+              onPress={() => onSavePost(post.id)}
+              disabled={editingPostId === post.id}
+              style={styles.communityActionButton}
+            />
+            <Button
+              label="Cancelar"
+              variant="ghost"
+              onPress={() => onCancelEditingPost(post.id)}
+              style={styles.communityActionButton}
+            />
+          </View>
+        </View>
+      ) : (
+        <>
+          <Text style={styles.communityCaption}>{post.caption}</Text>
+          <Text style={styles.communityBody}>{post.body}</Text>
+          {post.imageUrl ? <Image source={{ uri: post.imageUrl }} style={styles.communityPostImage} /> : null}
+        </>
+      )}
+      <View style={styles.communityActions}>
+        <Chip
+          label={
+            likingPostId === post.id
+              ? "Atualizando curtida..."
+              : `${post.likedByMe ? "Curtido" : "Curtir"} • ${post.likes}`
+          }
+          active={post.likedByMe}
+          onPress={() => onToggleLike(post)}
+        />
+        <Chip
+          label={`Comentarios • ${post.commentsCount ?? 0}`}
+          onPress={() => onOpenComments(post.id)}
+        />
+        <Chip
+          label={savingPostId === post.id ? "Salvando..." : post.savedByMe ? "Salvo" : "Salvar"}
+          active={post.savedByMe}
+          onPress={() => onToggleSave(post)}
+        />
+        {post.userId && post.userId === currentUserId ? (
+          <>
+            <Chip label="Editar" onPress={() => onStartEditingPost(post)} />
+            <Chip
+              label={deletingPostId === post.id ? "Excluindo..." : "Excluir"}
+              tone="warning"
+              onPress={() => onRemovePost(post.id)}
+            />
+          </>
+        ) : null}
+      </View>
+    </View>
+  )
+}
+
+function RecipeListItem({ receita, selectedMealLabel, navigation }) {
+  return (
+    <Pressable
+      onPress={() =>
+        navigation.navigate("RecipeDetails", {
+          recipeId: receita.id,
+          backLabel: selectedMealLabel || "Cardapios",
+        })
+      }
+      style={styles.recipeCard}
+    >
+      {receita.imageUrl ? (
+        <ImageBackground source={{ uri: receita.imageUrl }} imageStyle={styles.recipeImage} style={styles.recipeImageShell}>
+          <View style={styles.recipeOverlay}>
+            <Text style={styles.recipeTitle}>{receita.titulo}</Text>
+          </View>
+        </ImageBackground>
+      ) : (
+        <View style={styles.recipeFallback}>
+          <Text style={styles.recipeTitle}>{receita.titulo}</Text>
+        </View>
+      )}
+      <Text style={styles.recipeMeta}>{receita.calorias} kcal</Text>
+      <Text style={styles.recipeSmall}>{receita.proteina} proteina • {receita.tempo}</Text>
+      {(receita.categorias ?? []).length ? (
+        <View style={styles.chipRow}>
+          {receita.categorias.slice(0, 3).map((categoria) => {
+            const label = recipeCategoryOptions.find((option) => option.key === categoria)?.label ?? categoria
+            return <Chip key={`${receita.id}-${categoria}`} label={label} />
+          })}
+        </View>
+      ) : null}
+      {receita.ingredientes?.length ? (
+        <Text style={styles.recipeIngredients}>{receita.ingredientes.slice(0, 3).join(" • ")}</Text>
+      ) : null}
+    </Pressable>
+  )
+}
+
 export function DashboardScreen({ navigation }) {
+  useScreenPerformance("DashboardScreen")
   const appData = useAppDataContext()
   const resetOnboarding = useUserStore((state) => state.resetOnboarding)
   const dailyProgress = appData.tdee ? Math.min(100, Math.round((appData.caloriasObjetivo / appData.tdee) * 100)) : 0
@@ -128,7 +373,7 @@ export function DashboardScreen({ navigation }) {
   }
 
   return (
-    <Page>
+    <TabPage>
       <HeroCard style={styles.dashboardHero}>
         <LinearGradient colors={["#326f56", "#214b39", "#142a20"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.dashboardHeroGradient}>
           <View style={styles.dashboardHeroTopRow}>
@@ -140,7 +385,7 @@ export function DashboardScreen({ navigation }) {
           </View>
           <View style={styles.dashboardHeroMainRow}>
             <View style={styles.dashboardHeroMainCopy}>
-              <Text style={styles.dashboardHeroKicker}>Resumo diario</Text>
+              <Text style={styles.dashboardHeroKicker}>Resumo diário</Text>
               <Text style={styles.dashboardHeroName}>{appData.saudacao}</Text>
               <Text style={styles.dashboardHeroSubcopy}>{appData.objetivoLabel}</Text>
             </View>
@@ -157,7 +402,7 @@ export function DashboardScreen({ navigation }) {
             </View>
             <View style={styles.dashboardSummaryCard}>
               <Text style={styles.dashboardSummaryValue}>{appData.tdee || "-"}</Text>
-              <Text style={styles.dashboardSummaryLabel}>gasto diario</Text>
+              <Text style={styles.dashboardSummaryLabel}>gasto diário</Text>
             </View>
             <View style={styles.dashboardSummaryCard}>
               <Text style={styles.dashboardSummaryValue}>{appData.caloriasRestantes || 0}</Text>
@@ -185,9 +430,11 @@ export function DashboardScreen({ navigation }) {
             </View>
           </View>
 
-          {(appData.dataLoading || appData.dataError || appData.profileSyncing) ? (
+          {(appData.dataLoading || appData.dataRefreshing || appData.dataStale || appData.dataError || appData.profileSyncing) ? (
             <View style={styles.chipRow}>
               {appData.dataLoading ? <Chip label="Sincronizando dados..." /> : null}
+              {appData.dataRefreshing ? <Chip label="Atualizando em segundo plano..." /> : null}
+              {appData.dataStale ? <Chip label="Mostrando dados salvos" tone="warning" /> : null}
               {appData.profileSyncing ? <Chip label="Salvando perfil..." /> : null}
               {appData.dataError ? <Chip label={appData.dataError} tone="warning" /> : null}
             </View>
@@ -195,30 +442,30 @@ export function DashboardScreen({ navigation }) {
         </LinearGradient>
       </HeroCard>
 
-      <Card>
+      <Card style={styles.dashboardSectionCard}>
         <SectionHeader title="Acoes rapidas" helper="Atalhos principais para manter sua rotina em movimento." />
         <View style={styles.dashboardActionGrid}>
-          <Pressable onPress={() => navigation.navigate("Checkin")} style={styles.dashboardActionCard}>
+          <SurfacePressable onPress={() => navigation.navigate("Checkin")} style={styles.dashboardActionCard}>
             <Text style={styles.dashboardActionTitle}>Registrar check-in</Text>
             <Text style={styles.dashboardActionCopy}>Atualize peso e progresso semanal.</Text>
-          </Pressable>
-          <Pressable onPress={() => navigation.navigate("MealPlans")} style={styles.dashboardActionCard}>
-            <Text style={styles.dashboardActionTitle}>Abrir cardapios</Text>
-            <Text style={styles.dashboardActionCopy}>Veja refeicoes e receitas do seu plano.</Text>
-          </Pressable>
-          <Pressable onPress={() => navigation.navigate("Metas")} style={styles.dashboardActionCard}>
+          </SurfacePressable>
+          <SurfacePressable onPress={() => navigation.navigate("MealPlans")} style={styles.dashboardActionCard}>
+            <Text style={styles.dashboardActionTitle}>Abrir cardápios</Text>
+            <Text style={styles.dashboardActionCopy}>Veja refeições e receitas do seu plano.</Text>
+          </SurfacePressable>
+          <SurfacePressable onPress={() => navigation.navigate("Metas")} style={styles.dashboardActionCard}>
             <Text style={styles.dashboardActionTitle}>Metas</Text>
             <Text style={styles.dashboardActionCopy}>Acompanhe marcos e proximos passos.</Text>
-          </Pressable>
-          <Pressable onPress={() => navigation.navigate("Agenda")} style={styles.dashboardActionCard}>
+          </SurfacePressable>
+          <SurfacePressable onPress={() => navigation.navigate("Agenda")} style={styles.dashboardActionCard}>
             <Text style={styles.dashboardActionTitle}>Rotina</Text>
             <Text style={styles.dashboardActionCopy}>Organize lembretes e compromissos.</Text>
-          </Pressable>
+          </SurfacePressable>
         </View>
       </Card>
 
-      <Card>
-        <SectionHeader title="Conta e plano" helper="Configuracoes administrativas e simulacao de acesso." />
+      <Card style={styles.dashboardSectionCard}>
+        <SectionHeader title="Conta e plano" helper="Configurações administrativas e simulação de acesso." />
         <View style={styles.dashboardControlStack}>
           <Button
             label={appData.isPremium ? "Trocar para gratuito" : "Simular premium"}
@@ -231,9 +478,9 @@ export function DashboardScreen({ navigation }) {
             onPress={() => navigation.navigate("Suplementacao")}
           />
           <Button
-            label="Configuracoes"
+            label="Configurações"
             variant="ghost"
-            onPress={() => navigation.navigate("Configuracoes")}
+            onPress={() => navigation.navigate("Configurações")}
           />
           <Button
             label="Refazer onboarding"
@@ -243,27 +490,28 @@ export function DashboardScreen({ navigation }) {
           <Button label="Sair" variant="ghost" onPress={sair} />
         </View>
       </Card>
-    </Page>
+    </TabPage>
   )
 }
 
 export function MealsOverviewScreen({ navigation }) {
+  useScreenPerformance("MealsOverviewScreen")
   const { meals, caloriasObjetivo } = useAppDataContext()
 
   return (
-    <Page>
+    <TabPage>
       <Card>
-        <SectionHeader title="Abrir cardapios" helper="Entre nos planos completos organizados por refeicao." />
-        <Button label="Ver todos os cardapios" onPress={() => navigation.navigate("MealPlans")} />
+        <SectionHeader title="Abrir cardápios" helper="Entre nos planos completos organizados por refeição." />
+        <Button label="Ver todos os cardápios" onPress={() => navigation.navigate("MealPlans")} />
       </Card>
 
       <Card>
-        <SectionHeader title="Plano do dia" helper="Distribuicao estimada por refeicao." />
+        <SectionHeader title="Plano do dia" helper="Distribuição estimada por refeição." />
         <View style={styles.mealPillGrid}>
           {meals.map((meal) => <MealProgressCard key={meal.key} meal={meal} totalCalories={caloriasObjetivo} />)}
         </View>
       </Card>
-    </Page>
+    </TabPage>
   )
 }
 
@@ -272,6 +520,8 @@ export function CommunityScreen() {
   const {
     posts,
     loading,
+    initialLoading,
+    refreshing,
     loadingMore,
     submitting,
     likingPostId,
@@ -283,8 +533,9 @@ export function CommunityScreen() {
     hasMorePosts,
     currentUserId,
     source,
-    reloadPosts,
+    staleData,
     loadMorePosts,
+    loadCommentsForPost,
     publishPost,
     toggleLike,
     toggleSave,
@@ -300,20 +551,59 @@ export function CommunityScreen() {
   const [mealType, setMealType] = useState(communityMealOptions[0].key)
   const [feedback, setFeedback] = useState("")
   const [successMessage, setSuccessMessage] = useState("")
-  const [expandedComments, setExpandedComments] = useState({})
   const [commentDrafts, setCommentDrafts] = useState({})
   const [editingPostDrafts, setEditingPostDrafts] = useState({})
   const [isComposerOpen, setIsComposerOpen] = useState(false)
+  const [commentsSheetPostId, setCommentsSheetPostId] = useState("")
+  const feedRenderMeasureRef = useRef(startMeasure("community-feed-render"))
+  const composerName = nome?.trim() || "Você"
+  const previousTopPostIdRef = useRef("")
 
-  const selectedMealLabel = communityMealOptions.find((option) => option.key === mealType)?.label ?? "Refeicao"
+  useScreenPerformance("CommunityScreen", {
+    postsCount: posts.length,
+  })
+
+  const selectedMealLabel = communityMealOptions.find((option) => option.key === mealType)?.label ?? "Refeição"
   const previewUrl = imageAsset?.uri || String(imageUrl).trim()
+  const commentsSheetPost = posts.find((item) => item.id === commentsSheetPostId) ?? null
+
+  useEffect(() => {
+    feedRenderMeasureRef.current = startMeasure("community-feed-render", {
+      itemCount: posts.length,
+    })
+  }, [posts.length])
+
+  useEffect(() => {
+    const topPostId = posts[0]?.id ?? ""
+
+    if (!topPostId) return
+
+    if (!previousTopPostIdRef.current) {
+      previousTopPostIdRef.current = topPostId
+      return
+    }
+
+    if (previousTopPostIdRef.current !== topPostId) {
+      runSafeLayoutAnimation()
+      previousTopPostIdRef.current = topPostId
+    }
+  }, [posts])
+
+  if (initialLoading) {
+    return (
+      <AppLoadingScreen
+        title="Abrindo comunidade"
+        description="Preparando o feed, as interações e as publicações mais recentes."
+      />
+    )
+  }
 
   async function pickFromLibrary() {
     setFeedback("")
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync()
 
     if (!permission.granted) {
-      setFeedback("Precisamos de permissao para acessar a galeria e anexar a foto da refeicao.")
+      setFeedback("Precisamos de permissão para acessar a galeria e anexar a foto da refeição.")
       return
     }
 
@@ -334,7 +624,7 @@ export function CommunityScreen() {
     const permission = await ImagePicker.requestCameraPermissionsAsync()
 
     if (!permission.granted) {
-      setFeedback("Precisamos de permissao para usar a camera e fotografar a refeicao.")
+      setFeedback("Precisamos de permissão para usar a câmera e fotografar a refeição.")
       return
     }
 
@@ -360,15 +650,19 @@ export function CommunityScreen() {
     const { error } = await toggleLike(post.id)
 
     if (error) {
-      setFeedback("Nao foi possivel atualizar a curtida agora. Tente novamente em instantes.")
+      setFeedback("Não foi possível atualizar a curtida agora. Tente novamente em instantes.")
     }
   }
 
-  function toggleComments(postId) {
-    setExpandedComments((current) => ({
-      ...current,
-      [postId]: !current[postId],
-    }))
+  async function openComments(postId) {
+    setCommentsSheetPostId(postId)
+    const targetPost = posts.find((item) => item.id === postId)
+    if (!targetPost?.commentsLoaded && targetPost?.commentsCount) {
+      const { error } = await loadCommentsForPost(postId)
+      if (error) {
+        setFeedback("Não foi possível carregar os comentários agora.")
+      }
+    }
   }
 
   async function handleAddComment(postId) {
@@ -376,17 +670,13 @@ export function CommunityScreen() {
     const { error } = await addComment(postId, commentDrafts[postId] ?? "")
 
     if (error) {
-      setFeedback(error.message || "Nao foi possivel enviar o comentario agora.")
+      setFeedback(error.message || "Não foi possível enviar o comentário agora.")
       return
     }
 
     setCommentDrafts((current) => ({
       ...current,
       [postId]: "",
-    }))
-    setExpandedComments((current) => ({
-      ...current,
-      [postId]: true,
     }))
   }
 
@@ -416,7 +706,7 @@ export function CommunityScreen() {
   async function handleSavePost(post) {
     setFeedback("")
     const { error } = await toggleSave(post.id)
-    if (error) setFeedback("Nao foi possivel atualizar os posts salvos agora.")
+    if (error) setFeedback("Não foi possível atualizar os posts salvos agora.")
   }
 
   async function handleEditPost(postId) {
@@ -429,11 +719,11 @@ export function CommunityScreen() {
       caption: draft.caption ?? "",
       body: draft.body ?? "",
       imageUrl: draft.imageUrl ?? "",
-      mealLabel: draft.mealLabel ?? "Refeicao",
+      mealLabel: draft.mealLabel ?? "Refeição",
     })
 
     if (error) {
-      setFeedback(error.message || "Nao foi possivel salvar as edicoes do post.")
+      setFeedback(error.message || "Não foi possível salvar as edições do post.")
       return
     }
 
@@ -443,13 +733,24 @@ export function CommunityScreen() {
   async function handleRemovePost(postId) {
     setFeedback("")
     const { error } = await removePost(postId)
-    if (error) setFeedback("Nao foi possivel excluir o post agora.")
+    if (error) setFeedback("Não foi possível excluir o post agora.")
   }
 
   async function handleRemoveComment(postId, commentId) {
     setFeedback("")
     const { error } = await removeComment(postId, commentId)
-    if (error) setFeedback("Nao foi possivel excluir o comentario agora.")
+    if (error) setFeedback("Não foi possível excluir o comentário agora.")
+  }
+
+  function updateEditingDraft(postId, nextValues) {
+    setEditingPostDrafts((current) => ({
+      ...current,
+      [postId]: {
+        ...current[postId],
+        ...nextValues,
+        active: true,
+      },
+    }))
   }
 
   function handleCommunityScroll(event) {
@@ -468,12 +769,12 @@ export function CommunityScreen() {
     setSuccessMessage("")
 
     if (!caption.trim()) {
-      setFeedback("Adicione uma legenda curta para apresentar a sua refeicao.")
+      setFeedback("Adicione uma legenda curta para apresentar a sua refeição.")
       return
     }
 
     if (!body.trim()) {
-      setFeedback("Escreva um texto contando como foi a refeicao, a preparacao ou o contexto do post.")
+      setFeedback("Escreva um texto contando como foi a refeição, a preparação ou o contexto do post.")
       return
     }
 
@@ -486,7 +787,7 @@ export function CommunityScreen() {
     })
 
     if (error) {
-      setFeedback(`Nao foi possivel publicar agora. ${error.message || "Tente novamente em instantes."}`)
+      setFeedback(`Não foi possível publicar agora. ${error.message || "Tente novamente em instantes."}`)
       return
     }
 
@@ -498,9 +799,22 @@ export function CommunityScreen() {
     setIsComposerOpen(false)
     setSuccessMessage(
       publishSource === "supabase"
-        ? "Publicacao criada e salva no Supabase."
-        : "Publicacao criada localmente. Quando a persistencia online estiver disponivel, ela podera ser sincronizada.",
+        ? "Publicação criada e salva no Supabase."
+        : "Publicação criada localmente. Quando a persistência on-line estiver disponível, ela poderá ser sincronizada.",
     )
+  }
+
+  function handleInlineImageAction(action) {
+    setIsComposerOpen(true)
+    if (action === "gallery") {
+      pickFromLibrary()
+      return
+    }
+
+    if (action === "camera") {
+      takePhoto()
+      return
+    }
   }
 
   return (
@@ -514,68 +828,95 @@ export function CommunityScreen() {
         <View style={styles.communityTopBar}>
           <View style={styles.communityTitleWrap}>
             <Text style={styles.communitySectionLabel}>Comunidade</Text>
-            <Text style={styles.communitySectionTitle}>Feed de refeicoes e rotina</Text>
-            <Text style={styles.communitySectionSubtitle}>Atualizacoes da comunidade, posts salvos e interacoes em um so lugar.</Text>
+            <Text style={styles.communitySectionTitle}>Feed de refeições e rotina</Text>
+            <Text style={styles.communitySectionSubtitle}>Novos posts aparecem automaticamente conforme a comunidade publica.</Text>
           </View>
         </View>
 
-        <View style={styles.communityPrimaryActionRow}>
-          <Button
-            label={isComposerOpen ? "Fechar criacao" : "Criar post"}
-            onPress={() => setIsComposerOpen((current) => !current)}
-            style={styles.communityComposerToggle}
-          />
+        <View style={styles.communityComposerEntry}>
+          <Pressable onPress={() => setIsComposerOpen((current) => !current)} style={styles.communityComposerPromptButton}>
+            <View style={styles.communityComposerAvatar}>
+              <Text style={styles.communityComposerAvatarText}>{composerName.charAt(0).toUpperCase()}</Text>
+            </View>
+            <View style={styles.communityComposerPrompt}>
+              <Text style={styles.communityComposerPromptTitle}>No que você está pensando?</Text>
+              <Text style={styles.communityComposerPromptHint}>Compartilhe uma refeição, dica ou progresso.</Text>
+            </View>
+          </Pressable>
+          <View style={styles.communityComposerInlineActions}>
+            <Chip label="Galeria" onPress={() => handleInlineImageAction("gallery")} />
+            <Chip label="Câmera" onPress={() => handleInlineImageAction("camera")} />
+            <Chip label={isComposerOpen ? "Fechar" : "Texto"} active={isComposerOpen} onPress={() => setIsComposerOpen((current) => !current)} />
+          </View>
+        </View>
+
+        <View style={styles.chipRow}>
+          {refreshing ? <Chip label="Atualizando feed..." /> : null}
+          {staleData ? <Chip label="Mostrando dados salvos" tone="warning" /> : null}
+          {source === "supabase" ? <Chip label="Tempo real" active /> : null}
         </View>
 
       </Card>
 
-      {loading ? (
+      {loading && !posts.length ? (
         <StatusCard
           eyebrow="Sincronizando"
           title="Carregando comunidade"
-          description="Estamos buscando as publicacoes mais recentes no feed."
+          description="Estamos buscando as publicações mais recentes no feed."
         />
       ) : null}
 
       {isComposerOpen ? (
         <Card style={styles.communityComposerCard}>
-          <SectionHeader title="Criar publicacao" helper="Monte um post com legenda, texto e a imagem da sua refeicao." />
+          <View style={styles.communityComposerCompactHeader}>
+            <View style={styles.communityComposerHeader}>
+              <Text style={styles.communityComposerTitle}>Novo post</Text>
+              <Text style={styles.communityComposerHint}>Rápido, direto e sem excesso.</Text>
+            </View>
+            <Chip label={selectedMealLabel} active />
+          </View>
           <InputField
-            label="Legenda"
+            label="Legenda curta"
             value={caption}
             onChangeText={setCaption}
-            placeholder="Ex: Meu almoco proteico de hoje"
+            placeholder="Ex: Almoço proteico de hoje"
           />
           <InputField
-            label="Texto do post"
+            label="Descrição"
             value={body}
             onChangeText={setBody}
-            placeholder="Conte como preparou, como encaixou na dieta e qualquer dica util."
+            placeholder="Compartilhe a refeição ou uma dica rápida"
             multiline
-            numberOfLines={5}
+            numberOfLines={4}
           />
-          <InputField
-            label="Link da imagem"
-            value={imageUrl}
-            onChangeText={(value) => {
-              setImageAsset(null)
-              setImageUrl(value)
-            }}
-            placeholder="Cole a URL da foto da refeicao"
-            autoCapitalize="none"
-          />
-          <View style={styles.communityActionRow}>
-            <Button label="Escolher da galeria" variant="secondary" onPress={pickFromLibrary} style={styles.communityActionButton} />
-            <Button label="Usar camera" variant="secondary" onPress={takePhoto} style={styles.communityActionButton} />
+          <View style={styles.communityComposerToolbar}>
+            <Button label="Galeria" variant="secondary" onPress={pickFromLibrary} style={styles.communityToolbarButton} />
+            <Button label="Câmera" variant="secondary" onPress={takePhoto} style={styles.communityToolbarButton} />
+            <Button
+              label="Link"
+              variant="ghost"
+              onPress={() => {
+                if (imageAsset) {
+                  setImageAsset(null)
+                }
+              }}
+              style={styles.communityToolbarButton}
+            />
           </View>
-          {imageAsset ? (
-            <View style={styles.chipRow}>
-              <Chip label="Imagem selecionada do aparelho" active />
-              <Chip label="Remover imagem" onPress={clearSelectedImage} />
-            </View>
+          {!imageAsset ? (
+            <InputField
+              label="Link da imagem"
+              value={imageUrl}
+              onChangeText={(value) => {
+                setImageAsset(null)
+                setImageUrl(value)
+              }}
+              placeholder="Cole a URL da imagem se quiser"
+              autoCapitalize="none"
+            />
           ) : null}
           <View style={styles.filterGroup}>
-            <Text style={styles.filterTitle}>Tipo de refeicao</Text>
+            <Text style={styles.filterTitle}>Categoria</Text>
             <View style={styles.chipRow}>
               {communityMealOptions.map((option) => (
                 <Chip
@@ -588,193 +929,175 @@ export function CommunityScreen() {
             </View>
           </View>
           {previewUrl ? (
-            <View style={styles.communityPreviewBox}>
-              <Text style={styles.communityPreviewLabel}>Preview da imagem</Text>
-              <Image source={{ uri: previewUrl }} style={styles.communityPreviewImage} />
+            <View style={styles.communityPreviewRail}>
+              <Image source={{ uri: previewUrl }} style={styles.communityPreviewThumb} />
+              <View style={styles.communityPreviewCopy}>
+                <Text style={styles.communityPreviewLabel}>Imagem pronta para o post</Text>
+                <Text style={styles.communityPreviewHint}>Ela vai aparecer no topo da publicação.</Text>
+                <View style={styles.communityPreviewActions}>
+                  <Chip label="Trocar" onPress={pickFromLibrary} />
+                  <Chip label="Remover" onPress={clearSelectedImage} />
+                </View>
+              </View>
             </View>
           ) : null}
-          {feedback ? <StatusCard tone="warning" title="Post incompleto" description={feedback} /> : null}
-          {successMessage ? <StatusCard tone="success" title="Publicacao enviada" description={successMessage} /> : null}
-          <Button label={submitting ? "Publicando..." : "Publicar refeicao"} onPress={handlePublishPost} disabled={submitting} />
+          {feedback ? <Text style={styles.warningText}>{feedback}</Text> : null}
+          {successMessage ? <Text style={styles.communitySuccessText}>{successMessage}</Text> : null}
+          <Button label={submitting ? "Publicando..." : "Publicar"} onPress={handlePublishPost} disabled={submitting} />
         </Card>
       ) : null}
 
       <Card style={styles.communityFeedCard}>
         <View style={styles.communityFeedHeader}>
-          <SectionHeader title="Feed da comunidade" helper="Veja o que outras pessoas estao compartilhando hoje." trailing={`${posts.length} posts`} />
-          <Button label="Atualizar" variant="ghost" onPress={reloadPosts} style={styles.communityReloadButton} />
+          <SectionHeader title="Feed da comunidade" helper="Veja o que outras pessoas estão compartilhando agora." trailing={`${posts.length} posts`} />
         </View>
-        {posts.map((post) => (
-          <View key={post.id} style={styles.communityPost}>
-            <View style={styles.communityPostHeader}>
-              <View style={styles.communityAvatar}>
-                <Text style={styles.communityAvatarText}>{post.author.charAt(0).toUpperCase()}</Text>
-              </View>
-              <View style={styles.communityMeta}>
-                <Text style={styles.communityAuthor}>{post.author}</Text>
-                <Text style={styles.communityPostInfo}>{post.mealLabel} • {post.postedAt}</Text>
-              </View>
-              <View style={styles.communityPostMenu}>
-                <Text style={styles.communityPostMenuText}>•••</Text>
-              </View>
-            </View>
-            {editingPostDrafts[post.id]?.active ? (
-              <View style={styles.communityEditBox}>
-                <InputField
-                  label="Legenda"
-                  value={editingPostDrafts[post.id]?.caption ?? ""}
-                  onChangeText={(value) =>
-                    setEditingPostDrafts((current) => ({
-                      ...current,
-                      [post.id]: { ...current[post.id], caption: value, active: true },
-                    }))
-                  }
-                  placeholder="Legenda do post"
-                />
-                <InputField
-                  label="Texto"
-                  value={editingPostDrafts[post.id]?.body ?? ""}
-                  onChangeText={(value) =>
-                    setEditingPostDrafts((current) => ({
-                      ...current,
-                      [post.id]: { ...current[post.id], body: value, active: true },
-                    }))
-                  }
-                  placeholder="Texto do post"
-                  multiline
-                  numberOfLines={4}
-                />
-                <InputField
-                  label="Link da imagem"
-                  value={editingPostDrafts[post.id]?.imageUrl ?? ""}
-                  onChangeText={(value) =>
-                    setEditingPostDrafts((current) => ({
-                      ...current,
-                      [post.id]: { ...current[post.id], imageUrl: value, active: true },
-                    }))
-                  }
-                  placeholder="URL da imagem"
-                  autoCapitalize="none"
-                />
-                <View style={styles.communityActions}>
-                  <Button
-                    label={editingPostId === post.id ? "Salvando..." : "Salvar alteracoes"}
-                    variant="secondary"
-                    onPress={() => handleEditPost(post.id)}
-                    disabled={editingPostId === post.id}
-                    style={styles.communityActionButton}
-                  />
-                  <Button
-                    label="Cancelar"
-                    variant="ghost"
-                    onPress={() => cancelEditingPost(post.id)}
-                    style={styles.communityActionButton}
-                  />
-                </View>
-              </View>
-            ) : (
+        <FlatList
+          data={posts}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <CommunityPostCard
+              post={{
+                ...item,
+                commentDraft: commentDrafts[item.id] ?? "",
+              }}
+              currentUserId={currentUserId}
+              editingPostDraft={editingPostDrafts[item.id]}
+              likingPostId={likingPostId}
+              savingPostId={savingPostId}
+              editingPostId={editingPostId}
+              deletingPostId={deletingPostId}
+              onToggleLike={handleToggleLike}
+              onOpenComments={openComments}
+              onToggleSave={handleSavePost}
+              onStartEditingPost={startEditingPost}
+              onUpdateEditingDraft={updateEditingDraft}
+              onCancelEditingPost={cancelEditingPost}
+              onSavePost={handleEditPost}
+              onRemovePost={handleRemovePost}
+            />
+          )}
+          scrollEnabled={false}
+          removeClippedSubviews
+          initialNumToRender={4}
+          maxToRenderPerBatch={5}
+          windowSize={7}
+          updateCellsBatchingPeriod={60}
+          contentContainerStyle={styles.communityFeedList}
+          onContentSizeChange={() => {
+            const completed = feedRenderMeasureRef.current.end({
+              itemCount: posts.length,
+            })
+            trackListRenderMetric("community-feed", {
+              durationMs: completed.durationMs,
+              itemCount: posts.length,
+              virtualization: "flat-list",
+            })
+          }}
+          ListFooterComponent={
+            source === "supabase" && loadingMore ? (
+              <Button
+                label="Carregando mais posts..."
+                variant="secondary"
+                disabled
+                style={styles.communityLoadMoreButton}
+              />
+            ) : source === "supabase" && !hasMorePosts && posts.length > 0 ? (
+              <Text style={styles.communityFeedEnd}>Você chegou ao fim do feed por enquanto.</Text>
+            ) : null
+          }
+        />
+      </Card>
+
+      <Modal visible={Boolean(commentsSheetPost)} transparent animationType="slide" onRequestClose={() => setCommentsSheetPostId("")}>
+        <View style={styles.commentsModalOverlay}>
+          <Pressable style={styles.commentsModalBackdrop} onPress={() => setCommentsSheetPostId("")} />
+          <View style={styles.commentsSheet}>
+            {commentsSheetPost ? (
               <>
-                <Text style={styles.communityCaption}>{post.caption}</Text>
-                <Text style={styles.communityBody}>{post.body}</Text>
-                {post.imageUrl ? <Image source={{ uri: post.imageUrl }} style={styles.communityPostImage} /> : null}
-              </>
-            )}
-            <View style={styles.communityActions}>
-              <Chip
-                label={
-                  likingPostId === post.id
-                    ? "Atualizando curtida..."
-                    : `${post.likedByMe ? "Curtido" : "Curtir"} • ${post.likes}`
-                }
-                active={post.likedByMe}
-                onPress={() => handleToggleLike(post)}
-              />
-              <Chip
-                label={`${expandedComments[post.id] ? "Ocultar" : "Comentar"} • ${post.commentsCount ?? 0}`}
-                active={Boolean(expandedComments[post.id])}
-                onPress={() => toggleComments(post.id)}
-              />
-              <Chip
-                label={savingPostId === post.id ? "Salvando..." : post.savedByMe ? "Salvo" : "Salvar"}
-                active={post.savedByMe}
-                onPress={() => handleSavePost(post)}
-              />
-              {post.userId && post.userId === currentUserId ? (
-                <>
-                  <Chip label="Editar" onPress={() => startEditingPost(post)} />
-                  <Chip
-                    label={deletingPostId === post.id ? "Excluindo..." : "Excluir"}
-                    tone="warning"
-                    onPress={() => handleRemovePost(post.id)}
-                  />
-                </>
-              ) : null}
-            </View>
-            {expandedComments[post.id] ? (
-              <View style={styles.communityCommentSection}>
-                <Text style={styles.communityCommentTitle}>Comentarios</Text>
-                {(post.comments ?? []).length ? (
-                  post.comments.map((comment) => (
-                    <View key={comment.id} style={styles.communityCommentCard}>
+                <View style={styles.commentsSheetHandle} />
+                <View style={styles.commentsSheetHeader}>
+                  <View style={styles.commentsSheetHeaderCopy}>
+                    <Text style={styles.commentsSheetTitle}>Comentarios</Text>
+                    <Text style={styles.commentsSheetSubtitle}>{commentsSheetPost.caption}</Text>
+                  </View>
+                  <Chip label="Fechar" onPress={() => setCommentsSheetPostId("")} />
+                </View>
+                <FlatList
+                  data={commentsSheetPost.comments ?? []}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <View style={styles.communityCommentCard}>
                       <View style={styles.communityCommentHeader}>
-                        <Text style={styles.communityCommentAuthor}>{comment.author}</Text>
-                        <Text style={styles.communityCommentDate}>{comment.postedAt}</Text>
+                        <Text style={styles.communityCommentAuthor}>{item.author}</Text>
+                        <Text style={styles.communityCommentDate}>{item.postedAt}</Text>
                       </View>
-                      <Text style={styles.communityCommentBody}>{comment.body}</Text>
-                  {comment.userId && comment.userId === currentUserId ? (
-                    <View style={styles.communityCommentActions}>
+                      <Text style={styles.communityCommentBody}>{item.body}</Text>
+                      {item.userId && item.userId === currentUserId ? (
+                        <View style={styles.communityCommentActions}>
                           <Chip
-                            label={deletingCommentId === comment.id ? "Excluindo..." : "Excluir comentario"}
+                            label={deletingCommentId === item.id ? "Excluindo..." : "Excluir comentário"}
                             tone="warning"
-                            onPress={() => handleRemoveComment(post.id, comment.id)}
+                            onPress={() => handleRemoveComment(commentsSheetPost.id, item.id)}
                           />
                         </View>
                       ) : null}
                     </View>
-                  ))
-                ) : (
-                  <Text style={styles.communityCommentEmpty}>Seja a primeira pessoa a comentar essa refeicao.</Text>
-                )}
-                <InputField
-                  label="Novo comentario"
-                  value={commentDrafts[post.id] ?? ""}
-                  onChangeText={(value) =>
-                    setCommentDrafts((current) => ({
-                      ...current,
-                      [post.id]: value,
-                    }))
+                  )}
+                  style={styles.commentsList}
+                  contentContainerStyle={styles.commentsListContent}
+                  ListEmptyComponent={
+                    commentsSheetPost.commentsLoading ? (
+                      <Text style={styles.communityCommentEmpty}>Carregando comentários...</Text>
+                    ) : (
+                      <Text style={styles.communityCommentEmpty}>Seja a primeira pessoa a comentar essa refeição.</Text>
+                    )
                   }
-                  placeholder="Escreva um comentario util ou motivador..."
-                  multiline
-                  numberOfLines={3}
+                  ListFooterComponent={
+                    <>
+                      {commentsSheetPost.commentsError ? <Text style={styles.warningText}>{commentsSheetPost.commentsError}</Text> : null}
+                      {commentsSheetPost.commentsHasMore ? (
+                        <Button
+                          label={commentsSheetPost.commentsRefreshing ? "Carregando mais comentários..." : "Ver mais comentários"}
+                          variant="ghost"
+                          onPress={() => loadCommentsForPost(commentsSheetPost.id, { mode: "append" })}
+                          disabled={commentsSheetPost.commentsRefreshing}
+                        />
+                      ) : null}
+                    </>
+                  }
                 />
-                <Button
-                  label={commentingPostId === post.id ? "Enviando comentario..." : "Enviar comentario"}
-                  variant="secondary"
-                  onPress={() => handleAddComment(post.id)}
-                  disabled={commentingPostId === post.id}
-                />
-              </View>
+                <View style={styles.commentsComposer}>
+                  <InputField
+                    label="Novo comentário"
+                    value={commentDrafts[commentsSheetPost.id] ?? ""}
+                    onChangeText={(value) =>
+                      setCommentDrafts((current) => ({
+                        ...current,
+                        [commentsSheetPost.id]: value,
+                      }))
+                    }
+                    placeholder="Escreva um comentário útil ou motivador..."
+                    multiline
+                    numberOfLines={3}
+                  />
+                  <Button
+                    label={commentingPostId === commentsSheetPost.id ? "Enviando comentário..." : "Enviar comentário"}
+                    variant="secondary"
+                    onPress={() => handleAddComment(commentsSheetPost.id)}
+                    disabled={commentingPostId === commentsSheetPost.id}
+                  />
+                </View>
+              </>
             ) : null}
           </View>
-        ))}
-        {source === "supabase" && loadingMore ? (
-          <Button
-            label="Carregando mais posts..."
-            variant="secondary"
-            disabled
-            style={styles.communityLoadMoreButton}
-          />
-        ) : null}
-        {source === "supabase" && !hasMorePosts && posts.length > 0 ? (
-          <Text style={styles.communityFeedEnd}>Voce chegou ao fim do feed por enquanto.</Text>
-        ) : null}
-      </Card>
+        </View>
+      </Modal>
     </Page>
   )
 }
 
 export function CheckinScreen({ navigation }) {
+  useScreenPerformance("CheckinScreen")
   const { addWeeklyCheckin, history, peso, savingCheckin } = useAppDataContext()
   const [pesoCheckin, setPesoCheckin] = useState(peso || "")
   const [feedback, setFeedback] = useState("")
@@ -786,7 +1109,7 @@ export function CheckinScreen({ navigation }) {
 
     const parsedWeight = Number(String(pesoCheckin).replace(",", "."))
     if (Number.isNaN(parsedWeight) || parsedWeight <= 0) {
-      setFeedback("Informe um peso valido para registrar o check-in.")
+      setFeedback("Informe um peso válido para registrar o check-in.")
       return
     }
 
@@ -796,23 +1119,23 @@ export function CheckinScreen({ navigation }) {
     })
 
     if (error) {
-      setFeedback("Nao foi possivel salvar seu check-in agora. Tente novamente em instantes.")
+      setFeedback("Não foi possível salvar seu check-in agora. Tente novamente em instantes.")
       return
     }
 
-    setSuccessMessage("Check-in salvo com sucesso. Sua evolucao ja foi atualizada.")
+    setSuccessMessage("Check-in salvo com sucesso. Sua evolução já foi atualizada.")
     setTimeout(() => {
       navigation.navigate("AppTabs", {
-        screen: "Evolucao",
+        screen: "Evolução",
         params: { checkinSaved: Date.now() },
       })
     }, 500)
   }
 
   return (
-    <Page>
+    <TabPage>
       <Card>
-        <SectionHeader title="Check-in semanal" helper="Acompanhamento rapido para manter a constancia." trailing={history.length ? `${history.length} semanas` : "Novo"} />
+        <SectionHeader title="Check-in semanal" helper="Acompanhamento rápido para manter a constância." trailing={history.length ? `${history.length} semanas` : "Novo"} />
         <InputField
           label="Seu peso atual"
           value={String(pesoCheckin)}
@@ -820,11 +1143,11 @@ export function CheckinScreen({ navigation }) {
           placeholder="Ex: 72.4"
           keyboardType="decimal-pad"
         />
-        {feedback ? <StatusCard tone="warning" title="Nao foi possivel concluir o check-in" description={feedback} /> : null}
+        {feedback ? <StatusCard tone="warning" title="Não foi possível concluir o check-in" description={feedback} /> : null}
         {successMessage ? <StatusCard tone="success" title="Check-in registrado" description={successMessage} /> : null}
         <Button label={savingCheckin ? "Salvando check-in..." : "Salvar check-in"} onPress={salvar} disabled={savingCheckin} />
       </Card>
-    </Page>
+    </TabPage>
   )
 }
 
@@ -833,13 +1156,13 @@ function EvolutionChart({ chartPoints, history, checkinsLoading }) {
     return checkinsLoading ? (
       <StatusCard
         eyebrow="Sincronizando"
-        title="Carregando historico de evolucao"
+        title="Carregando histórico de evolução"
         description="Estamos buscando os registros mais recentes no Supabase."
       />
     ) : (
       <EmptyStateCard
-        title="Seu grafico ainda nao tem registros"
-        description="Assim que o primeiro check-in for salvo, a evolucao do peso aparecera aqui automaticamente."
+        title="Seu gráfico ainda não tem registros"
+        description="Assim que o primeiro check-in for salvo, a evolução do peso aparecerá aqui automaticamente."
       />
     )
   }
@@ -852,7 +1175,7 @@ function EvolutionChart({ chartPoints, history, checkinsLoading }) {
 
   return (
     <Card>
-      <SectionHeader title="Grafico de evolucao" trailing="Peso semanal" />
+      <SectionHeader title="Gráfico de evolução" trailing="Peso semanal" />
       <Svg width="100%" height={160} viewBox="0 0 280 120">
         <Line x1="0" y1="112" x2="280" y2="112" stroke="#d8d1c4" strokeWidth="2" />
         <Polyline points={points} fill="none" stroke={colors.brand} strokeWidth="3" />
@@ -871,6 +1194,7 @@ function EvolutionChart({ chartPoints, history, checkinsLoading }) {
 }
 
 export function EvolutionScreen({ route }) {
+  useScreenPerformance("EvolutionScreen")
   const {
     chartPoints,
     history,
@@ -890,22 +1214,22 @@ export function EvolutionScreen({ route }) {
   } = useAppDataContext()
 
   return (
-    <Page>
+    <TabPage>
       {route.params?.checkinSaved ? (
         <StatusCard
           tone="success"
           eyebrow="Check-in atualizado"
-          title="Evolucao sincronizada com sucesso"
-          description="O peso salvo ja faz parte do seu historico e do grafico de evolucao."
+          title="Evolução sincronizada com sucesso"
+          description="O peso salvo já faz parte do seu histórico e do gráfico de evolução."
         />
       ) : null}
 
       <Card>
-        <SectionHeader title="Evolucao recente" helper="Visualize seu progresso com mais clareza e contexto." trailing={history.length ? `${history.length} registros` : "Sem registros"} />
+        <SectionHeader title="Evolução recente" helper="Visualize seu progresso com mais clareza e contexto." trailing={history.length ? `${history.length} registros` : "Sem registros"} />
         <MetricGrid
           items={[
             { label: "Peso atual", value: latestCheckin ? `${latestCheckin.peso} kg` : peso ? `${peso} kg` : "-" },
-            { label: "Variacao", value: previousCheckin ? `${weightDelta > 0 ? "+" : ""}${weightDelta} kg` : "-" },
+            { label: "Variação", value: previousCheckin ? `${weightDelta > 0 ? "+" : ""}${weightDelta} kg` : "-" },
             { label: "Check-ins", value: history.length || "-" },
           ]}
         />
@@ -923,16 +1247,16 @@ export function EvolutionScreen({ route }) {
             { label: "Altura", value: altura ? `${altura} cm` : "-" },
             { label: "Atividade", value: atividade || "-" },
             { label: "TMB", value: tmb || "-" },
-            { label: "Gasto diario", value: tdee || "-" },
-            { label: "Meta calorica", value: caloriasObjetivo ? `${caloriasObjetivo} kcal` : "-" },
+            { label: "Gasto diário", value: tdee || "-" },
+            { label: "Meta calórica", value: caloriasObjetivo ? `${caloriasObjetivo} kcal` : "-" },
           ]}
         />
       </Card>
 
       <Card>
-        <SectionHeader title="Historico recente" trailing="Ultimos registros" />
+        <SectionHeader title="Histórico recente" trailing="Últimos registros" />
         {history.length ? [...history].slice(-6).reverse().map((item) => (
-          <View key={item.id} style={styles.historyItem}>
+          <SurfaceBox key={item.id} style={styles.historyItem}>
             <View style={styles.historyCopy}>
               <Text style={styles.historyTitle}>{item.label}</Text>
               <Text style={styles.historyDescription}>Registro semanal salvo no Supabase.</Text>
@@ -941,15 +1265,15 @@ export function EvolutionScreen({ route }) {
               <Text style={styles.historyValue}>{item.peso} kg</Text>
               <Text style={styles.historyDate}>{formatShortDate(item.date)}</Text>
             </View>
-          </View>
+          </SurfaceBox>
         )) : (
           <EmptyStateCard
             title="Nenhum check-in registrado ainda"
-            description="Quando o primeiro check-in for salvo, os ultimos registros aparecerao aqui com data e peso."
+            description="Quando o primeiro check-in for salvo, os últimos registros aparecerão aqui com data e peso."
           />
         )}
       </Card>
-    </Page>
+    </TabPage>
   )
 }
 
@@ -972,6 +1296,9 @@ function FilterGroup({ title, options, value, onChange }) {
 }
 
 export function MealPlansScreen({ navigation, route }) {
+  useScreenPerformance("MealPlansScreen", {
+    mealKey: route.params?.mealKey ?? "",
+  })
   const { mealCardImagesByKey } = useAppDataContext()
   const mealKey = route.params?.mealKey ?? ""
   const objetivo = useUserStore((state) => state.objetivo)
@@ -979,6 +1306,9 @@ export function MealPlansScreen({ navigation, route }) {
   const fallbackPlan = useMemo(() => getPlanByObjective(objetivo), [objetivo])
   const [plano, setPlano] = useState(fallbackPlan)
   const [loading, setLoading] = useState(true)
+  const [initialLoading, setInitialLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [staleData, setStaleData] = useState(false)
   const [feedback, setFeedback] = useState("")
   const [fatalError, setFatalError] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
@@ -986,6 +1316,7 @@ export function MealPlansScreen({ navigation, route }) {
   const [calorieFilter, setCalorieFilter] = useState("all")
   const [timeFilter, setTimeFilter] = useState("all")
   const [categoryFilter, setCategoryFilter] = useState("all")
+  const recipesRenderMeasureRef = useRef(startMeasure("recipe-list-render"))
 
   const objetivoLabel = objetivoLabels[objetivo] ?? objetivoLabels.manter
   const selectedMealLabel = mealLabels[mealKey] ?? ""
@@ -994,26 +1325,55 @@ export function MealPlansScreen({ navigation, route }) {
     let isMounted = true
 
     async function loadPlan() {
-      setLoading(true)
+      const planCacheKey = cacheKeys.mealPlan(objetivo)
+      setRefreshing(true)
       setPlano(fallbackPlan)
       setFeedback("")
       setFatalError("")
+      setStaleData(false)
 
-      const { plan, error } = await getMealPlanFromSupabase(objetivo)
+      const cachedPlan = await readCachedResource(planCacheKey)
       if (!isMounted) return
 
-      if (plan) {
-        setPlano(plan)
-      } else if (error) {
-        setFeedback(`Supabase indisponivel: ${error.message}`)
-        if (!fallbackPlan || Object.values(fallbackPlan).every((recipes) => recipes.length === 0)) {
-          setFatalError("Nao foi possivel carregar os cardapios agora.")
-        }
+      if (cachedPlan.exists && cachedPlan.data) {
+        setPlano(cachedPlan.data)
+        setLoading(false)
+        setInitialLoading(false)
       } else {
+        setLoading(true)
+        setInitialLoading(true)
+      }
+
+      const result = await fetchCachedResource({
+        cacheKey: planCacheKey,
+        label: `meal-plan:${objetivo}`,
+        retries: 1,
+        maxAgeMs: MEAL_PLAN_MAX_AGE_MS,
+        requestFn: () => getMealPlanFromSupabase(objetivo),
+        getData: (response) => response.plan,
+        fallbackData: fallbackPlan,
+      })
+      if (!isMounted) return
+
+      if (result.data) {
+        setPlano(result.data)
+      }
+
+      if (result.error && result.fromCache) {
+        setFeedback("Sem conexão no momento. Exibindo cardápios salvos neste aparelho.")
+        setStaleData(true)
+      } else if (result.error) {
+        setFeedback(`Supabase indisponivel: ${result.error.message}`)
+        if (!fallbackPlan || Object.values(fallbackPlan).every((recipes) => recipes.length === 0)) {
+          setFatalError("Não foi possível carregar os cardápios agora.")
+        }
+      } else if (!result.data) {
         setFeedback("Sem receitas cadastradas no Supabase para essa meta. Exibindo fallback local.")
       }
 
       setLoading(false)
+      setInitialLoading(false)
+      setRefreshing(false)
     }
 
     loadPlan()
@@ -1068,6 +1428,17 @@ export function MealPlansScreen({ navigation, route }) {
   }, [calorieFilter, categoryFilter, hasActiveFilters, mealEntries, mealKey, normalizedQuery, proteinFilter, timeFilter])
 
   const totalMatches = filteredEntries.reduce((total, [, receitas]) => total + receitas.length, 0)
+  const visibleRecipes = useMemo(
+    () => (mealKey ? filteredEntries.flatMap(([, receitas]) => receitas) : []),
+    [filteredEntries, mealKey],
+  )
+
+  useEffect(() => {
+    recipesRenderMeasureRef.current = startMeasure("recipe-list-render", {
+      itemCount: visibleRecipes.length,
+      mealKey,
+    })
+  }, [mealKey, visibleRecipes.length])
 
   function clearFilters() {
     setSearchQuery("")
@@ -1077,18 +1448,28 @@ export function MealPlansScreen({ navigation, route }) {
     setCategoryFilter("all")
   }
 
+  if (initialLoading) {
+    return (
+      <AppLoadingScreen
+        title={mealKey ? `Carregando ${selectedMealLabel.toLowerCase()}` : "Carregando cardápios"}
+        description="Buscando receitas, imagens e organizando as opções desta etapa."
+      />
+    )
+  }
+
   return (
-    <Page>
+    <TabPage>
       <HeroCard>
-        <Text style={styles.eyebrow}>Seu plano diario</Text>
-        <Text style={styles.heroTitle}>{mealKey ? selectedMealLabel : `Cardapios para ${objetivoLabel}`}</Text>
+        <Text style={styles.eyebrow}>Seu plano diário</Text>
+        <Text style={styles.heroTitle}>{mealKey ? selectedMealLabel : `Cardápios para ${objetivoLabel}`}</Text>
         <Text style={styles.heroSubtitle}>
           {mealKey
             ? `Receitas recomendadas para ${selectedMealLabel.toLowerCase()} dentro do plano de ${objetivoLabel.toLowerCase()}.`
-            : `Selecione uma refeicao do dia para visualizar receitas alinhadas ao seu objetivo. Meta calorica: ${caloriasObjetivo ? `${caloriasObjetivo} kcal` : "a definir"}`}
+            : `Selecione uma refeição do dia para visualizar receitas alinhadas ao seu objetivo. Meta calórica: ${caloriasObjetivo ? `${caloriasObjetivo} kcal` : "a definir"}`}
         </Text>
         <View style={styles.chipRow}>
-          {loading ? <Chip label="Atualizando..." /> : null}
+          {refreshing ? <Chip label="Atualizando..." /> : null}
+          {staleData ? <Chip label="Mostrando dados salvos" tone="warning" /> : null}
           {mealKey && hasActiveFilters ? <Chip label={`${totalMatches} receitas encontradas`} /> : null}
         </View>
         {feedback ? <Text style={styles.warningText}>{feedback}</Text> : null}
@@ -1097,7 +1478,7 @@ export function MealPlansScreen({ navigation, route }) {
       {loading ? (
         <StatusCard
           eyebrow="Sincronizando"
-          title="Carregando plano de refeicoes"
+          title="Carregando plano de refeições"
           description="Estamos buscando as melhores receitas para o objetivo atual."
         />
       ) : null}
@@ -1106,7 +1487,7 @@ export function MealPlansScreen({ navigation, route }) {
         <StatusCard
           tone="warning"
           eyebrow="Instabilidade"
-          title="Nao foi possivel carregar os cardapios"
+          title="Não foi possível carregar os cardápios"
           description={fatalError}
         />
       ) : null}
@@ -1115,7 +1496,7 @@ export function MealPlansScreen({ navigation, route }) {
         <Card>
           <SectionHeader title="Busca inteligente" trailing={selectedMealLabel} />
           <InputField
-            label="Titulo ou ingrediente"
+            label="Título ou ingrediente"
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholder="Busque por ovo, frango, panqueca..."
@@ -1137,7 +1518,7 @@ export function MealPlansScreen({ navigation, route }) {
             onChange={setCalorieFilter}
             options={[
               { value: "all", label: "Todas" },
-              { value: "low", label: "Ate 300" },
+              { value: "low", label: "Até 300" },
               { value: "balanced", label: "301 a 500" },
               { value: "high", label: "500+" },
             ]}
@@ -1148,7 +1529,7 @@ export function MealPlansScreen({ navigation, route }) {
             onChange={setTimeFilter}
             options={[
               { value: "all", label: "Todos" },
-              { value: "fast", label: "Ate 10 min" },
+              { value: "fast", label: "Até 10 min" },
               { value: "mid", label: "11 a 20" },
               { value: "long", label: "20+" },
             ]}
@@ -1168,10 +1549,10 @@ export function MealPlansScreen({ navigation, route }) {
 
       {!mealKey && !fatalError ? (
         <Card>
-          <SectionHeader title="Refeicoes disponiveis" helper="Escolha uma refeicao para ver as receitas." />
+          <SectionHeader title="Refeições disponíveis" helper="Escolha uma refeição para ver as receitas." />
           <View style={styles.mealPillGrid}>
             {mealEntries.map(([currentMealKey, receitas]) => (
-              <Pressable
+              <SurfacePressable
                 key={currentMealKey}
                 onPress={() => navigation.navigate("MealPlans", { mealKey: currentMealKey })}
                 style={getMealImageUrl(mealCardImagesByKey, currentMealKey) ? styles.mealActionImageCard : styles.mealAction}
@@ -1193,7 +1574,7 @@ export function MealPlansScreen({ navigation, route }) {
                     <Text style={styles.mealPillCopy}>{receitas.length} receitas</Text>
                   </>
                 )}
-              </Pressable>
+              </SurfacePressable>
             ))}
           </View>
         </Card>
@@ -1204,53 +1585,42 @@ export function MealPlansScreen({ navigation, route }) {
           <SectionHeader title={mealLabels[currentMealKey]} trailing={`${receitas.length} opcoes`} />
           {receitas.length === 0 ? (
             <EmptyStateCard
-              title={hasActiveFilters ? "Nenhuma receita encontrada" : "Nenhuma receita disponivel"}
+              title={hasActiveFilters ? "Nenhuma receita encontrada" : "Nenhuma receita disponível"}
               description={
                 hasActiveFilters
-                  ? `Ajuste sua busca ou os filtros para encontrar novas opcoes em ${mealLabels[currentMealKey].toLowerCase()}.`
-                  : `Ainda nao existem receitas cadastradas para ${mealLabels[currentMealKey].toLowerCase()}.`
+                  ? `Ajuste sua busca ou os filtros para encontrar novas opções em ${mealLabels[currentMealKey].toLowerCase()}.`
+                  : `Ainda não existem receitas cadastradas para ${mealLabels[currentMealKey].toLowerCase()}.`
               }
             />
           ) : (
-            <View style={styles.recipeGrid}>
-              {receitas.map((receita) => (
-                <Pressable
-                  key={receita.id}
-                  onPress={() =>
-                    navigation.navigate("RecipeDetails", {
-                      recipeId: receita.id,
-                      backLabel: selectedMealLabel || "Cardapios",
-                    })
-                  }
-                  style={styles.recipeCard}
-                >
-                  {receita.imageUrl ? (
-                    <ImageBackground source={{ uri: receita.imageUrl }} imageStyle={styles.recipeImage} style={styles.recipeImageShell}>
-                      <View style={styles.recipeOverlay}>
-                        <Text style={styles.recipeTitle}>{receita.titulo}</Text>
-                      </View>
-                    </ImageBackground>
-                  ) : (
-                    <View style={styles.recipeFallback}>
-                      <Text style={styles.recipeTitle}>{receita.titulo}</Text>
-                    </View>
-                  )}
-                  <Text style={styles.recipeMeta}>{receita.calorias} kcal</Text>
-                  <Text style={styles.recipeSmall}>{receita.proteina} proteina • {receita.tempo}</Text>
-                  {(receita.categorias ?? []).length ? (
-                    <View style={styles.chipRow}>
-                      {receita.categorias.slice(0, 3).map((categoria) => {
-                        const label = recipeCategoryOptions.find((option) => option.key === categoria)?.label ?? categoria
-                        return <Chip key={`${receita.id}-${categoria}`} label={label} />
-                      })}
-                    </View>
-                  ) : null}
-                  {receita.ingredientes?.length ? (
-                    <Text style={styles.recipeIngredients}>{receita.ingredientes.slice(0, 3).join(" • ")}</Text>
-                  ) : null}
-                </Pressable>
-              ))}
-            </View>
+            <FlatList
+              data={receitas}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <RecipeListItem receita={item} selectedMealLabel={selectedMealLabel} navigation={navigation} />
+              )}
+              scrollEnabled={false}
+              removeClippedSubviews
+              initialNumToRender={6}
+              maxToRenderPerBatch={6}
+              windowSize={6}
+              updateCellsBatchingPeriod={50}
+              contentContainerStyle={styles.recipeGrid}
+              onContentSizeChange={() => {
+                const completed = recipesRenderMeasureRef.current.end({
+                  itemCount: visibleRecipes.length,
+                  mealKey: currentMealKey,
+                })
+                trackListRenderMetric("meal-plan-recipes", {
+                  durationMs: completed.durationMs,
+                  itemCount: visibleRecipes.length,
+                  virtualization: "flat-list",
+                  context: {
+                    mealKey: currentMealKey,
+                  },
+                })
+              }}
+            />
           )}
         </Card>
       )) : null}
@@ -1258,24 +1628,30 @@ export function MealPlansScreen({ navigation, route }) {
       {hasActiveFilters && totalMatches === 0 ? (
         <EmptyStateCard
           title="Nenhum resultado para esta combinacao"
-          description="Tente outro titulo, ingrediente ou ajuste os filtros para visualizar mais receitas desta refeicao."
+          description="Tente outro título, ingrediente ou ajuste os filtros para visualizar mais receitas desta refeição."
           actionLabel="Limpar filtros"
           onAction={clearFilters}
         />
       ) : null}
 
-      <Button label={mealKey ? "Voltar para as refeicoes" : "Voltar ao painel"} variant="ghost" onPress={() => navigation.goBack()} />
-    </Page>
+      <Button label={mealKey ? "Voltar para as refeições" : "Voltar ao painel"} variant="ghost" onPress={() => navigation.goBack()} />
+    </TabPage>
   )
 }
 
 export function RecipeDetailsScreen({ navigation, route }) {
+  useScreenPerformance("RecipeDetailsScreen", {
+    recipeId: route.params?.recipeId ?? "",
+  })
   const recipeId = route.params?.recipeId ?? ""
   const isPremium = useUserStore((state) => state.isPremium)
   const fallbackRecipe = useMemo(() => getRecipeById(recipeId), [recipeId])
   const [receita, setReceita] = useState(fallbackRecipe)
   const [source, setSource] = useState(fallbackRecipe ? "local" : "none")
   const [loading, setLoading] = useState(true)
+  const [initialLoading, setInitialLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [staleData, setStaleData] = useState(false)
   const [feedback, setFeedback] = useState("")
   const [adTimer, setAdTimer] = useState(isPremium ? 0 : 6)
   const [adLiberado, setAdLiberado] = useState(isPremium)
@@ -1284,22 +1660,52 @@ export function RecipeDetailsScreen({ navigation, route }) {
     let isMounted = true
 
     async function loadRecipe() {
-      setLoading(true)
       setReceita(fallbackRecipe)
       setSource(fallbackRecipe ? "local" : "none")
       setFeedback("")
+      setRefreshing(true)
+      setStaleData(false)
 
-      const { recipe, error } = await getRecipeFromSupabase(recipeId)
+      const recipeCacheKey = cacheKeys.recipe(recipeId)
+      const cachedRecipe = await readCachedResource(recipeCacheKey)
       if (!isMounted) return
 
-      if (recipe) {
-        setReceita(recipe)
-        setSource("supabase")
-      } else if (error) {
-        setFeedback(`Supabase indisponivel: ${error.message}`)
+      if (cachedRecipe.exists && cachedRecipe.data) {
+        setReceita(cachedRecipe.data)
+        setSource("cache")
+        setLoading(false)
+        setInitialLoading(false)
+      } else {
+        setLoading(true)
+        setInitialLoading(true)
+      }
+
+      const result = await fetchCachedResource({
+        cacheKey: recipeCacheKey,
+        label: `recipe:${recipeId}`,
+        retries: 1,
+        maxAgeMs: RECIPE_MAX_AGE_MS,
+        requestFn: () => getRecipeFromSupabase(recipeId),
+        getData: (response) => response.recipe,
+        fallbackData: fallbackRecipe,
+      })
+      if (!isMounted) return
+
+      if (result.data) {
+        setReceita(result.data)
+        setSource(result.fromCache ? "cache" : result.data === fallbackRecipe ? "local" : "supabase")
+      }
+
+      if (result.error && result.fromCache) {
+        setFeedback("Sem conexão no momento. Exibindo receita salva neste aparelho.")
+        setStaleData(true)
+      } else if (result.error) {
+        setFeedback(`Supabase indisponivel: ${result.error.message}`)
       }
 
       setLoading(false)
+      setInitialLoading(false)
+      setRefreshing(false)
     }
 
     loadRecipe()
@@ -1324,11 +1730,12 @@ export function RecipeDetailsScreen({ navigation, route }) {
     return () => clearInterval(interval)
   }, [adLiberado, isPremium, loading])
 
-  if (loading) {
+  if (initialLoading) {
     return (
-      <Page>
-        <StatusCard eyebrow="Sincronizando" title="Carregando receita" description="Estamos preparando os detalhes desta receita para voce." />
-      </Page>
+      <AppLoadingScreen
+        title="Carregando receita"
+        description="Preparando ingredientes, modo de preparo e detalhes desta opção."
+      />
     )
   }
 
@@ -1336,9 +1743,9 @@ export function RecipeDetailsScreen({ navigation, route }) {
     return (
       <Page>
         <EmptyStateCard
-          title="Receita nao encontrada"
-          description="Essa receita nao esta mais disponivel ou ainda nao foi sincronizada."
-          actionLabel="Voltar para cardapios"
+          title="Receita não encontrada"
+          description="Essa receita não está mais disponível ou ainda não foi sincronizada."
+          actionLabel="Voltar para cardápios"
           onAction={() => navigation.goBack()}
         />
       </Page>
@@ -1350,11 +1757,11 @@ export function RecipeDetailsScreen({ navigation, route }) {
       <Page>
         <Card>
           <Text style={styles.eyebrow}>Modo gratuito</Text>
-          <Text style={styles.heroTitle}>Anuncio patrocinado</Text>
-          <Text style={styles.heroSubtitle}>A receita sera liberada em {adTimer}s.</Text>
+          <Text style={styles.heroTitle}>Anúncio patrocinado</Text>
+          <Text style={styles.heroSubtitle}>A receita será liberada em {adTimer}s.</Text>
           <Card style={styles.adBox}>
             <Text style={styles.historyTitle}>Suplemento Nutri+</Text>
-            <Text style={styles.historyDescription}>Recupere melhor no pos-treino com formula de aminoacidos.</Text>
+            <Text style={styles.historyDescription}>Recupere melhor no pós-treino com fórmula de aminoácidos.</Text>
           </Card>
           <Button label={adTimer > 0 ? `Aguarde ${adTimer}s` : "Ver receita"} onPress={() => setAdLiberado(true)} disabled={adTimer > 0} />
         </Card>
@@ -1364,24 +1771,31 @@ export function RecipeDetailsScreen({ navigation, route }) {
 
   return (
     <Page>
+      {(refreshing || staleData || feedback) ? (
+        <View style={styles.chipRow}>
+          {refreshing ? <Chip label="Atualizando receita..." /> : null}
+          {staleData ? <Chip label="Mostrando dados salvos" tone="warning" /> : null}
+          {feedback ? <Chip label={feedback} tone="warning" /> : null}
+        </View>
+      ) : null}
       <Card>
         {receita.imageUrl ? (
           <ImageBackground source={{ uri: receita.imageUrl }} imageStyle={styles.recipeHeroImage} style={styles.recipeHero}>
             <View style={styles.recipeOverlay}>
               <Text style={styles.eyebrow}>Receita selecionada</Text>
               <Text style={styles.heroTitle}>{receita.titulo}</Text>
-              <Text style={styles.heroSubtitle}>{receita.calorias} kcal • {receita.proteina} de proteina • {receita.tempo}</Text>
+              <Text style={styles.heroSubtitle}>{receita.calorias} kcal • {receita.proteina} de proteína • {receita.tempo}</Text>
             </View>
           </ImageBackground>
         ) : (
           <>
             <Text style={styles.eyebrow}>Receita selecionada</Text>
             <Text style={styles.heroTitle}>{receita.titulo}</Text>
-            <Text style={styles.heroSubtitle}>{receita.calorias} kcal • {receita.proteina} de proteina • {receita.tempo}</Text>
+            <Text style={styles.heroSubtitle}>{receita.calorias} kcal • {receita.proteina} de proteína • {receita.tempo}</Text>
           </>
         )}
         <View style={styles.chipRow}>
-          <Chip label={`Fonte: ${source === "supabase" ? "Supabase" : "Fallback local"}`} />
+          <Chip label={`Fonte: ${source === "supabase" ? "Supabase" : source === "cache" ? "Cache local" : "Fallback local"}`} />
         </View>
         {feedback ? <StatusCard tone="warning" title="Receita exibida com dados locais" description={feedback} /> : null}
       </Card>
@@ -1401,7 +1815,7 @@ export function RecipeDetailsScreen({ navigation, route }) {
       </Card>
 
       <Button
-        label={route.params?.backLabel ? `Voltar para ${route.params.backLabel}` : "Voltar aos cardapios"}
+        label={route.params?.backLabel ? `Voltar para ${route.params.backLabel}` : "Voltar aos cardápios"}
         variant="ghost"
         onPress={() => navigation.goBack()}
       />
@@ -1409,22 +1823,209 @@ export function RecipeDetailsScreen({ navigation, route }) {
   )
 }
 
+export function PremiumScreen() {
+  const isPremium = useUserStore((state) => state.isPremium)
+  const premiumBillingCycle = useUserStore((state) => state.premiumBillingCycle)
+  const setPremiumSubscription = useUserStore((state) => state.setPremiumSubscription)
+  const setPremium = useUserStore((state) => state.setPremium)
+  const [selectedPlan, setSelectedPlan] = useState(premiumBillingCycle || "monthly")
+
+  useScreenPerformance("PremiumScreen", {
+    premiumStatus: isPremium ? "active" : "inactive",
+    selectedPlan,
+  })
+
+  const activePlan = premiumPlans.find((plan) => plan.key === premiumBillingCycle) ?? premiumPlans[0]
+  const selectedPlanData = premiumPlans.find((plan) => plan.key === selectedPlan) ?? premiumPlans[0]
+
+  function handleSubscribe(planKey) {
+    setSelectedPlan(planKey)
+    setPremiumSubscription({
+      isPremium: true,
+      premiumBillingCycle: planKey,
+    })
+  }
+
+  function handleManageAccess() {
+    if (isPremium) {
+      setPremium(false)
+      return
+    }
+
+    handleSubscribe(selectedPlan)
+  }
+
+  return (
+    <Page>
+      <HeroCard style={styles.premiumHeroCard}>
+        <LinearGradient colors={["#17392c", "#285843", "#3f7e5f"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.premiumHeroGradient}>
+          <Text style={styles.premiumHeroEyebrow}>Assinatura premium</Text>
+          <Text style={styles.premiumHeroTitle}>Escolha entre mensal ou anual</Text>
+          <Text style={styles.premiumHeroSubtitle}>
+            Destrave a experiência completa com receitas liberadas, acesso sem espera e uma proposta mais robusta para continuidade.
+          </Text>
+          <View style={styles.chipRow}>
+            <Chip label={isPremium ? `Plano ativo: ${activePlan.title}` : "Nenhum plano ativo"} active={isPremium} />
+            {!isPremium ? <Chip label="Cancele quando quiser" /> : null}
+          </View>
+        </LinearGradient>
+      </HeroCard>
+
+      <Card>
+        <SectionHeader title="Comparativo de planos" helper="Selecione a modalidade que faz mais sentido para sua rotina." />
+        <View style={styles.premiumPlansStack}>
+          {premiumPlans.map((plan) => {
+            const isSelected = selectedPlan === plan.key
+            const isActivePlan = isPremium && premiumBillingCycle === plan.key
+            const isDarkCard = plan.key === "yearly"
+
+            return (
+              <Pressable
+                key={plan.key}
+                onPress={() => setSelectedPlan(plan.key)}
+                style={[
+                  styles.premiumPlanCard,
+                  isDarkCard && styles.premiumPlanCardDark,
+                  isSelected && styles.premiumPlanCardSelected,
+                ]}
+              >
+                <LinearGradient
+                  colors={plan.accent}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.premiumPlanGradient}
+                >
+                  <View style={styles.premiumPlanHeader}>
+                    <View style={styles.premiumPlanTitleWrap}>
+                      <Text style={[styles.premiumPlanTitle, isDarkCard && styles.premiumPlanTitleDark]}>{plan.title}</Text>
+                      <Text style={[styles.premiumPlanHeadline, isDarkCard && styles.premiumPlanHeadlineDark]}>{plan.headline}</Text>
+                    </View>
+                    {plan.savings ? <Chip label={plan.savings} active={!isDarkCard} /> : null}
+                  </View>
+
+                  <View style={styles.premiumPlanPriceRow}>
+                    <Text style={[styles.premiumPlanPrice, isDarkCard && styles.premiumPlanPriceDark]}>{plan.price}</Text>
+                    <Text style={[styles.premiumPlanPeriod, isDarkCard && styles.premiumPlanPeriodDark]}>{plan.period}</Text>
+                  </View>
+
+                  {plan.originalPrice ? (
+                    <View style={styles.premiumSavingsRow}>
+                      <Text style={[styles.premiumOriginalPrice, isDarkCard && styles.premiumOriginalPriceDark]}>
+                        De {plan.originalPrice}
+                      </Text>
+                      <Text style={[styles.premiumSavingsText, isDarkCard && styles.premiumSavingsTextDark]}>
+                        Economize {plan.savingsPercent}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  <Text style={[styles.premiumPlanHighlight, isDarkCard && styles.premiumPlanHighlightDark]}>{plan.highlight}</Text>
+
+                  <View style={styles.premiumFeatureList}>
+                    {plan.features.map((feature) => (
+                      <Text
+                        key={`${plan.key}-${feature}`}
+                        style={[styles.premiumFeatureItem, isDarkCard && styles.premiumFeatureItemDark]}
+                      >
+                        • {feature}
+                      </Text>
+                    ))}
+                  </View>
+
+                  <Button
+                    label={isActivePlan ? plan.ctaActive : plan.ctaIdle}
+                    variant={isDarkCard ? "secondary" : "primary"}
+                    onPress={() => handleSubscribe(plan.key)}
+                    style={styles.premiumPlanButton}
+                  />
+                </LinearGradient>
+              </Pressable>
+            )
+          })}
+        </View>
+      </Card>
+
+      <Card>
+        <SectionHeader title="O que você libera" helper="Benefícios desenhados para dar mais ritmo e menos fricção no uso diário." />
+        <View style={styles.premiumBenefitsGrid}>
+          <SurfaceBox style={styles.premiumBenefitCard}>
+            <Text style={styles.premiumBenefitTitle}>Receitas sem bloqueio</Text>
+            <Text style={styles.premiumBenefitCopy}>Acesso direto aos detalhes premium, sem contagem regressiva para destravar o conteúdo.</Text>
+          </SurfaceBox>
+          <SurfaceBox style={styles.premiumBenefitCard}>
+            <Text style={styles.premiumBenefitTitle}>Jornada mais contínua</Text>
+            <Text style={styles.premiumBenefitCopy}>Melhor experiência para manter foco nas metas, refeições e progresso ao longo das semanas.</Text>
+          </SurfaceBox>
+          <SurfaceBox style={styles.premiumBenefitCard}>
+            <Text style={styles.premiumBenefitTitle}>Base para novos extras</Text>
+            <Text style={styles.premiumBenefitCopy}>Área pronta para receber recursos exclusivos, comparativos de planos e upgrades futuros.</Text>
+          </SurfaceBox>
+        </View>
+      </Card>
+
+      <Card>
+        <SectionHeader title="Resumo da assinatura" trailing={selectedPlanData.title} />
+        <Text style={styles.premiumSummaryText}>
+          {isPremium
+            ? `Seu acesso premium está ativo no ${activePlan.title.toLowerCase()}.`
+            : `Você selecionou o ${selectedPlanData.title.toLowerCase()} para ativação.`}
+        </Text>
+        <Text style={styles.premiumSummaryCaption}>
+          Esta etapa está pronta para depois integrar checkout real, restauração de compra e gestão de renovação.
+        </Text>
+        <View style={styles.premiumCheckoutStack}>
+          <Button
+            label={`Checkout App Store • ${selectedPlanData.title}`}
+            onPress={() => handleSubscribe(selectedPlan)}
+          />
+          <Button
+            label={`Checkout Google Play • ${selectedPlanData.title}`}
+            variant="secondary"
+            onPress={() => handleSubscribe(selectedPlan)}
+          />
+        </View>
+        <Button
+          label={
+            isPremium
+              ? `Desativar simulacao do ${activePlan.title.toLowerCase()}`
+              : `Ativar ${selectedPlanData.title.toLowerCase()}`
+          }
+          onPress={handleManageAccess}
+        />
+      </Card>
+
+      <Card>
+        <SectionHeader title="FAQ de cobrança" helper="Perguntas principais para reduzir dúvidas antes da assinatura." />
+        <View style={styles.premiumFaqList}>
+          {premiumFaqItems.map((item) => (
+            <SurfaceBox key={item.question} style={styles.premiumFaqCard} tone="default">
+              <Text style={styles.premiumFaqQuestion}>{item.question}</Text>
+              <Text style={styles.premiumFaqAnswer}>{item.answer}</Text>
+            </SurfaceBox>
+          ))}
+        </View>
+      </Card>
+    </Page>
+  )
+}
+
 export function PlaceholderScreen({ title, description, bullets }) {
+  useScreenPerformance("PlaceholderScreen", { title })
   const { objetivoLabel } = useAppDataContext()
 
   return (
     <Page>
       <Card>
         <SectionHeader title={title} helper={description} trailing={objetivoLabel} />
-        <Card style={styles.placeholderHighlight}>
+        <SurfaceBox style={styles.placeholderHighlight} tone="soft">
           <Text style={styles.historyTitle}>Espaco reservado no menu</Text>
           <Text style={styles.historyDescription}>Essa area ja esta pronta na navegacao mobile para evoluir sem refazer a estrutura principal.</Text>
-        </Card>
+        </SurfaceBox>
         {bullets.map((bullet) => (
-          <View key={bullet} style={styles.placeholderItem}>
+          <SurfaceBox key={bullet} style={styles.placeholderItem} tone="muted">
             <Text style={styles.historyTitle}>{bullet}</Text>
-            <Text style={styles.historyDescription}>Quando voce quiser, a gente pode transformar este bloco em uma tela funcional mantendo a mesma linguagem visual.</Text>
-          </View>
+            <Text style={styles.historyDescription}>Quando você quiser, a gente pode transformar este bloco em uma tela funcional mantendo a mesma linguagem visual.</Text>
+          </SurfaceBox>
         ))}
       </Card>
     </Page>
@@ -1445,8 +2046,8 @@ const styles = StyleSheet.create({
     padding: 0,
   },
   dashboardHeroGradient: {
-    padding: spacing.lg,
-    gap: spacing.md,
+    padding: spacing.md,
+    gap: spacing.sm,
   },
   dashboardHeroTopRow: {
     flexDirection: "row",
@@ -1489,9 +2090,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   dashboardScoreCard: {
-    minWidth: 98,
+    minWidth: 92,
     borderRadius: radius.lg,
-    padding: spacing.md,
+    padding: spacing.sm,
     backgroundColor: "rgba(255,255,255,0.12)",
     justifyContent: "space-between",
     alignItems: "flex-start",
@@ -1502,8 +2103,8 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   dashboardScoreValue: {
-    fontSize: 28,
-    lineHeight: 32,
+    fontSize: 26,
+    lineHeight: 30,
     fontWeight: "800",
     color: colors.surface,
   },
@@ -1521,7 +2122,8 @@ const styles = StyleSheet.create({
     minWidth: "30%",
     borderRadius: radius.md,
     backgroundColor: "rgba(255,255,255,0.1)",
-    padding: spacing.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 10,
     gap: 2,
   },
   dashboardSummaryValue: {
@@ -1535,9 +2137,13 @@ const styles = StyleSheet.create({
   },
   dashboardInlineNutrition: {
     gap: spacing.sm,
-    paddingTop: spacing.sm,
+    paddingTop: spacing.xs,
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.12)",
+  },
+  dashboardSectionCard: {
+    padding: spacing.md,
+    gap: spacing.sm,
   },
   dashboardInlineNutritionTitle: {
     ...typography.bodyStrong,
@@ -1580,17 +2186,11 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   dashboardActionGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
+    gap: spacing.xs,
   },
   dashboardActionCard: {
-    minWidth: "48%",
-    flexGrow: 1,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    backgroundColor: colors.surfaceMuted,
-    gap: spacing.xs,
+    width: "100%",
+    gap: 4,
   },
   dashboardActionTitle: {
     ...typography.bodyStrong,
@@ -1601,7 +2201,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   dashboardControlStack: {
-    gap: spacing.sm,
+    gap: spacing.xs,
   },
   mealPillGrid: {
     flexDirection: "row",
@@ -1684,14 +2284,13 @@ const styles = StyleSheet.create({
   mealAction: {
     minWidth: "48%",
     flexGrow: 1,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceMuted,
-    padding: spacing.md,
     gap: spacing.xs,
   },
   mealActionImageCard: {
     minWidth: "48%",
     flexGrow: 1,
+    padding: 0,
+    overflow: "hidden",
   },
   mealPillTitle: {
     ...typography.bodyStrong,
@@ -1743,9 +2342,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     gap: spacing.md,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    alignItems: "center",
   },
   historyCopy: {
     flex: 1,
@@ -1806,16 +2403,89 @@ const styles = StyleSheet.create({
     ...typography.bodySmall,
     color: colors.textMuted,
   },
-  communityPrimaryActionRow: {
-    alignItems: "flex-start",
+  communityComposerEntry: {
+    gap: spacing.sm,
   },
-  communityComposerToggle: {
-    minWidth: 112,
+  communityComposerPromptButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderRadius: radius.lg,
+    padding: spacing.sm,
+    backgroundColor: colors.surfaceMuted,
+  },
+  communityComposerInlineActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  communityComposerAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.round,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.brandSoft,
+  },
+  communityComposerAvatarText: {
+    ...typography.bodyStrong,
+    color: colors.brandDark,
+  },
+  communityComposerPrompt: {
+    flex: 1,
+    gap: 2,
+  },
+  communityComposerPromptTitle: {
+    ...typography.bodyStrong,
+    color: colors.text,
+  },
+  communityComposerPromptHint: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
+  },
+  communityComposerEntryAction: {
+    borderRadius: radius.round,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    backgroundColor: colors.surface,
+  },
+  communityComposerEntryActionText: {
+    ...typography.caption,
+    color: colors.brand,
+    textTransform: "uppercase",
   },
   communityComposerCard: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  communityComposerCompactHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+  },
+  communityComposerHeader: {
+    gap: 2,
+    flex: 1,
+  },
+  communityComposerTitle: {
+    ...typography.h3,
+    color: colors.text,
+  },
+  communityComposerHint: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
+  },
+  communityComposerToolbar: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  communityToolbarButton: {
+    flexGrow: 1,
   },
   communityFeedCard: {
     paddingHorizontal: 0,
@@ -1830,31 +2500,45 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
   },
+  communityFeedList: {
+    gap: spacing.md,
+  },
   warningText: {
     ...typography.bodySmall,
     color: colors.warning,
   },
-  communityPreviewBox: {
-    gap: spacing.sm,
-  },
-  communityActionRow: {
+  communityPreviewRail: {
     flexDirection: "row",
-    flexWrap: "wrap",
+    alignItems: "center",
     gap: spacing.sm,
-  },
-  communityActionButton: {
-    flexGrow: 1,
+    padding: spacing.sm,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceMuted,
   },
   communityPreviewLabel: {
     ...typography.caption,
     color: colors.textMuted,
     textTransform: "uppercase",
   },
-  communityPreviewImage: {
-    width: "100%",
-    height: 220,
-    borderRadius: radius.lg,
+  communityPreviewThumb: {
+    width: 82,
+    height: 82,
+    borderRadius: radius.md,
     backgroundColor: colors.surfaceMuted,
+  },
+  communityPreviewCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  communityPreviewHint: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
+  },
+  communityPreviewActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    paddingTop: spacing.xs,
   },
   communityPost: {
     gap: spacing.sm,
@@ -1971,6 +2655,62 @@ const styles = StyleSheet.create({
     ...typography.bodySmall,
     color: colors.textMuted,
   },
+  commentsModalOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(12, 20, 15, 0.2)",
+  },
+  commentsModalBackdrop: {
+    flex: 1,
+  },
+  commentsSheet: {
+    maxHeight: "82%",
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  commentsSheetHandle: {
+    alignSelf: "center",
+    width: 54,
+    height: 5,
+    borderRadius: radius.round,
+    backgroundColor: colors.border,
+  },
+  commentsSheetHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+  },
+  commentsSheetHeaderCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  commentsSheetTitle: {
+    ...typography.h3,
+    color: colors.text,
+  },
+  commentsSheetSubtitle: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
+  },
+  commentsList: {
+    flexGrow: 0,
+  },
+  commentsListContent: {
+    gap: spacing.sm,
+    paddingBottom: spacing.sm,
+  },
+  commentsComposer: {
+    gap: spacing.sm,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
   communityLoadMoreButton: {
     marginTop: spacing.sm,
     marginHorizontal: spacing.lg,
@@ -1982,8 +2722,176 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     paddingHorizontal: spacing.lg,
   },
-  communityReloadButton: {
-    alignSelf: "flex-start",
+  communitySuccessText: {
+    ...typography.bodySmall,
+    color: colors.success,
+  },
+  premiumHeroCard: {
+    padding: 0,
+    overflow: "hidden",
+  },
+  premiumHeroGradient: {
+    padding: spacing.lg,
+    gap: spacing.sm,
+  },
+  premiumHeroEyebrow: {
+    ...typography.caption,
+    color: "rgba(255,253,250,0.74)",
+    textTransform: "uppercase",
+  },
+  premiumHeroTitle: {
+    ...typography.h1,
+    color: colors.surface,
+  },
+  premiumHeroSubtitle: {
+    ...typography.body,
+    color: "rgba(255,253,250,0.84)",
+  },
+  premiumPlansStack: {
+    gap: spacing.md,
+  },
+  premiumPlanCard: {
+    borderRadius: radius.lg,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  premiumPlanCardSelected: {
+    borderColor: colors.brand,
+    borderWidth: 2,
+  },
+  premiumPlanCardDark: {
+    borderColor: "#285843",
+  },
+  premiumPlanGradient: {
+    padding: spacing.lg,
+    gap: spacing.sm,
+  },
+  premiumPlanHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: spacing.md,
+  },
+  premiumPlanTitleWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  premiumPlanTitle: {
+    ...typography.h3,
+    color: colors.text,
+  },
+  premiumPlanTitleDark: {
+    color: colors.surface,
+  },
+  premiumPlanHeadline: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
+  },
+  premiumPlanHeadlineDark: {
+    color: "rgba(255,253,250,0.8)",
+  },
+  premiumPlanPriceRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: spacing.xs,
+  },
+  premiumPlanPrice: {
+    fontSize: 30,
+    lineHeight: 34,
+    fontWeight: "800",
+    color: colors.brandDark,
+  },
+  premiumPlanPriceDark: {
+    color: colors.surface,
+  },
+  premiumPlanPeriod: {
+    ...typography.bodyStrong,
+    color: colors.textMuted,
+  },
+  premiumPlanPeriodDark: {
+    color: "rgba(255,253,250,0.82)",
+  },
+  premiumSavingsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  premiumOriginalPrice: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
+    textDecorationLine: "line-through",
+  },
+  premiumOriginalPriceDark: {
+    color: "rgba(255,253,250,0.68)",
+  },
+  premiumSavingsText: {
+    ...typography.caption,
+    color: colors.success,
+    textTransform: "uppercase",
+  },
+  premiumSavingsTextDark: {
+    color: "#c8f0d7",
+  },
+  premiumPlanHighlight: {
+    ...typography.bodySmall,
+    color: colors.text,
+  },
+  premiumPlanHighlightDark: {
+    color: "rgba(255,253,250,0.9)",
+  },
+  premiumFeatureList: {
+    gap: spacing.xs,
+  },
+  premiumFeatureItem: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
+  },
+  premiumFeatureItemDark: {
+    color: "rgba(255,253,250,0.82)",
+  },
+  premiumPlanButton: {
+    marginTop: spacing.xs,
+  },
+  premiumBenefitsGrid: {
+    gap: spacing.sm,
+  },
+  premiumBenefitCard: {
+    gap: spacing.xs,
+  },
+  premiumBenefitTitle: {
+    ...typography.bodyStrong,
+    color: colors.text,
+  },
+  premiumBenefitCopy: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
+  },
+  premiumSummaryText: {
+    ...typography.body,
+    color: colors.text,
+  },
+  premiumSummaryCaption: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
+  },
+  premiumCheckoutStack: {
+    gap: spacing.sm,
+  },
+  premiumFaqList: {
+    gap: spacing.sm,
+  },
+  premiumFaqCard: {
+    gap: spacing.xs,
+  },
+  premiumFaqQuestion: {
+    ...typography.bodyStrong,
+    color: colors.text,
+  },
+  premiumFaqAnswer: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
   },
   recipeGrid: {
     gap: spacing.md,
@@ -2047,10 +2955,9 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   placeholderHighlight: {
-    backgroundColor: colors.brandSoft,
+    gap: spacing.xs,
   },
   placeholderItem: {
     gap: spacing.xs,
-    paddingTop: spacing.sm,
   },
 })

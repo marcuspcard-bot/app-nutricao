@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { NavigationContainer } from "@react-navigation/native"
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs"
 import { createNativeStackNavigator } from "@react-navigation/native-stack"
 import { Ionicons } from "@expo/vector-icons"
-import { ActivityIndicator, Platform, StyleSheet, Text, View } from "react-native"
+import { Platform, StyleSheet, View } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 import { AppDataProvider } from "../mobile/AppDataContext"
+import { useAppDataContext } from "../mobile/AppDataContext"
 import {
   CheckinScreen,
   CommunityScreen,
@@ -14,6 +15,7 @@ import {
   MealPlansScreen,
   MealsOverviewScreen,
   PlaceholderScreen,
+  PremiumScreen,
   RecipeDetailsScreen,
 } from "../mobile/screens/AppScreens"
 import {
@@ -30,7 +32,10 @@ import {
   SexoScreen,
   TermsScreen,
 } from "../mobile/screens/PublicScreens"
-import { colors, radius, spacing, typography } from "../mobile/theme"
+import AppLoadingScreen from "../components/AppLoadingScreen"
+import { colors, radius, typography } from "../mobile/theme"
+import { logError, logInfo } from "../lib/appLogger"
+import { startMeasure, trackScreenMetric } from "../lib/performanceMonitor"
 import { hasSupabaseConfig, supabase } from "../lib/supabaseClient"
 
 const Stack = createNativeStackNavigator()
@@ -51,27 +56,37 @@ function TabIcon({ name, focused }) {
 
 function AppTabs() {
   const insets = useSafeAreaInsets()
-  const bottomInset = Platform.OS === "android" ? Math.max(insets.bottom, 8) : insets.bottom
+  const bottomInset = Platform.OS === "ios" ? insets.bottom : 0
+  const tabBarHeight = Platform.OS === "ios" ? 68 + bottomInset : 68
+  const tabBarBottomOffset = Platform.OS === "ios" ? 10 : 18
 
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
+        safeAreaInsets: {
+          bottom: 0,
+          top: 0,
+        },
         tabBarActiveTintColor: colors.brand,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarHideOnKeyboard: true,
         tabBarStyle: [
           styles.tabBar,
           {
-            height: 58 + bottomInset,
-            paddingBottom: bottomInset,
+            bottom: tabBarBottomOffset,
+            height: tabBarHeight,
+            paddingTop: 6,
+            paddingBottom: Platform.OS === "ios" ? Math.max(bottomInset, 6) : 6,
           },
         ],
+        tabBarItemStyle: styles.tabBarItem,
+        tabBarIconStyle: styles.tabBarIconSlot,
         tabBarLabelStyle: styles.tabBarLabel,
       }}
     >
       <Tab.Screen
-        name="Inicio"
+        name="Início"
         component={DashboardScreen}
         options={{
           tabBarIcon: ({ focused }) => <TabIcon name="home" focused={focused} />,
@@ -85,14 +100,14 @@ function AppTabs() {
         }}
       />
       <Tab.Screen
-        name="Refeicoes"
+        name="Refeições"
         component={MealsOverviewScreen}
         options={{
           tabBarIcon: ({ focused }) => <TabIcon name="restaurant" focused={focused} />,
         }}
       />
       <Tab.Screen
-        name="Evolucao"
+        name="Evolução"
         component={EvolutionScreen}
         options={{
           tabBarIcon: ({ focused }) => <TabIcon name="analytics" focused={focused} />,
@@ -100,13 +115,7 @@ function AppTabs() {
       />
       <Tab.Screen
         name="Premium"
-        children={() => (
-          <PlaceholderScreen
-            title="Premium"
-            description="Area reservada para assinatura do aplicativo, comparativo de planos e beneficios extras."
-            bullets={["Planos e assinatura", "Beneficios premium", "Gestao do acesso"]}
-          />
-        )}
+        component={PremiumScreen}
         options={{
           tabBarIcon: ({ focused }) => <TabIcon name="diamond" focused={focused} />,
         }}
@@ -118,61 +127,78 @@ function AppTabs() {
 function PrivateNavigator() {
   return (
     <AppDataProvider>
-      <Stack.Navigator
-        screenOptions={{
-          headerShadowVisible: false,
-          headerTintColor: colors.text,
-          headerStyle: { backgroundColor: colors.background },
-          headerTitleStyle: { fontFamily: typography.semiBold },
-          contentStyle: { backgroundColor: colors.background },
-        }}
-      >
-        <Stack.Screen name="AppTabs" component={AppTabs} options={{ headerShown: false }} />
-        <Stack.Screen name="Checkin" component={CheckinScreen} options={{ title: "Check-in semanal" }} />
-        <Stack.Screen name="MealPlans" component={MealPlansScreen} options={{ title: "Cardapios" }} />
-        <Stack.Screen name="RecipeDetails" component={RecipeDetailsScreen} options={{ title: "Receita" }} />
-        <Stack.Screen
-          name="Metas"
-          children={() => (
-            <PlaceholderScreen
-              title="Metas"
-              description="Espaco reservado para metas pessoais, marcos e proximos objetivos."
-              bullets={["Metas de peso", "Objetivos por fase", "Marcos da sua jornada"]}
-            />
-          )}
-        />
-        <Stack.Screen
-          name="Suplementacao"
-          children={() => (
-            <PlaceholderScreen
-              title="Suplementacao"
-              description="Area reservada para protocolos, horarios e observacoes."
-              bullets={["Protocolos ativos", "Horarios e lembretes", "Ajustes por objetivo"]}
-            />
-          )}
-        />
-        <Stack.Screen
-          name="Agenda"
-          children={() => (
-            <PlaceholderScreen
-              title="Rotina"
-              description="Espaco para organizar sua semana, seus lembretes e seus compromissos."
-              bullets={["Planejamento da semana", "Lembretes pessoais", "Organizacao do dia"]}
-            />
-          )}
-        />
-        <Stack.Screen
-          name="Configuracoes"
-          children={() => (
-            <PlaceholderScreen
-              title="Configuracoes"
-              description="Area pronta para preferencias, planos e personalizacao futura."
-              bullets={["Preferencias da conta", "Assinatura e plano", "Ajustes do sistema"]}
-            />
-          )}
-        />
-      </Stack.Navigator>
+      <PrivateAppGate />
     </AppDataProvider>
+  )
+}
+
+function PrivateAppGate() {
+  const { initialAppReady } = useAppDataContext()
+
+  if (!initialAppReady) {
+    return (
+      <AppLoadingScreen
+        title="Montando seu painel"
+        description="Buscando seu perfil, check-ins e imagens para abrir o app completo."
+      />
+    )
+  }
+
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerShadowVisible: false,
+        headerTintColor: colors.text,
+        headerStyle: { backgroundColor: colors.background },
+        headerTitleStyle: { fontFamily: typography.semiBold },
+        contentStyle: { backgroundColor: colors.background },
+      }}
+    >
+      <Stack.Screen name="AppTabs" component={AppTabs} options={{ headerShown: false }} />
+      <Stack.Screen name="Checkin" component={CheckinScreen} options={{ title: "Check-in semanal" }} />
+      <Stack.Screen name="MealPlans" component={MealPlansScreen} options={{ title: "Cardápios" }} />
+      <Stack.Screen name="RecipeDetails" component={RecipeDetailsScreen} options={{ title: "Receita" }} />
+      <Stack.Screen
+        name="Metas"
+        children={() => (
+          <PlaceholderScreen
+            title="Metas"
+            description="Espaço reservado para metas pessoais, marcos e próximos objetivos."
+            bullets={["Metas de peso", "Objetivos por fase", "Marcos da sua jornada"]}
+          />
+        )}
+      />
+      <Stack.Screen
+        name="Suplementacao"
+        children={() => (
+          <PlaceholderScreen
+            title="Suplementacao"
+            description="Área reservada para protocolos, horários e observações."
+            bullets={["Protocolos ativos", "Horários e lembretes", "Ajustes por objetivo"]}
+          />
+        )}
+      />
+      <Stack.Screen
+        name="Agenda"
+        children={() => (
+          <PlaceholderScreen
+            title="Rotina"
+            description="Espaço para organizar sua semana, seus lembretes e seus compromissos."
+            bullets={["Planejamento da semana", "Lembretes pessoais", "Organizacao do dia"]}
+          />
+        )}
+      />
+      <Stack.Screen
+        name="Configurações"
+        children={() => (
+          <PlaceholderScreen
+            title="Configurações"
+            description="Área pronta para preferências, planos e personalização futura."
+            bullets={["Preferências da conta", "Assinatura e plano", "Ajustes do sistema"]}
+          />
+        )}
+      />
+    </Stack.Navigator>
   )
 }
 
@@ -203,6 +229,9 @@ function PublicNavigator() {
 function AppRoutes() {
   const [initializing, setInitializing] = useState(() => hasSupabaseConfig)
   const [session, setSession] = useState(null)
+  const navigationRef = useRef(null)
+  const activeRouteNameRef = useRef("")
+  const transitionMeasureRef = useRef(startMeasure("navigation:bootstrap"))
 
   useEffect(() => {
     if (!hasSupabaseConfig || !supabase) {
@@ -225,12 +254,20 @@ function AppRoutes() {
       try {
         const { data, error } = await supabase.auth.getSession()
         if (error) {
+          logError("Falha ao recuperar sessão inicial.", {
+            scope: "navigation-bootstrap",
+            error,
+          })
           finishBootstrap(null)
           return
         }
 
         finishBootstrap(data.session ?? null)
-      } catch {
+      } catch (error) {
+        logError("Erro inesperado ao carregar sessão inicial.", {
+          scope: "navigation-bootstrap",
+          error,
+        })
         finishBootstrap(null)
       }
     }
@@ -272,40 +309,99 @@ function AppRoutes() {
 
   if (initializing) {
     return (
-      <View style={styles.loadingShell}>
-        <ActivityIndicator color={colors.brand} size="large" />
-        <Text style={styles.loadingText}>Preparando seu ambiente mobile...</Text>
-      </View>
+      <AppLoadingScreen
+        title="Preparando seu acesso"
+        description="Validando sua sessão para abrir a experiência certa do aplicativo."
+      />
     )
   }
 
   return (
-    <NavigationContainer theme={navTheme}>
+    <NavigationContainer
+      ref={navigationRef}
+      theme={navTheme}
+      onReady={() => {
+        const route = navigationRef.current?.getCurrentRoute()
+        const routeName = route?.name ?? "unknown"
+        activeRouteNameRef.current = routeName
+
+        const completed = transitionMeasureRef.current.end({
+          from: "bootstrap",
+          to: routeName,
+        })
+
+        trackScreenMetric(routeName, {
+          event: "navigation-ready",
+          durationMs: completed.durationMs,
+          context: completed.context,
+        })
+        logInfo("Navegacao inicial pronta.", {
+          routeName,
+          durationMs: completed.durationMs,
+        })
+      }}
+      onStateChange={() => {
+        const route = navigationRef.current?.getCurrentRoute()
+        const nextRouteName = route?.name ?? "unknown"
+        const previousRouteName = activeRouteNameRef.current || "unknown"
+
+        if (previousRouteName === nextRouteName) {
+          return
+        }
+
+        const completed = transitionMeasureRef.current.end({
+          from: previousRouteName,
+          to: nextRouteName,
+        })
+
+        trackScreenMetric(nextRouteName, {
+          event: "navigation-transition",
+          durationMs: completed.durationMs,
+          context: completed.context,
+        })
+        logInfo("Tela alterada.", {
+          previousRouteName,
+          nextRouteName,
+          durationMs: completed.durationMs,
+        })
+
+        activeRouteNameRef.current = nextRouteName
+        transitionMeasureRef.current = startMeasure(`navigation:${nextRouteName}`, {
+          from: previousRouteName,
+        })
+      }}
+    >
       {session ? <PrivateNavigator /> : <PublicNavigator />}
     </NavigationContainer>
   )
 }
 
 const styles = StyleSheet.create({
-  loadingShell: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.background,
-    gap: spacing.md,
-  },
-  loadingText: {
-    ...typography.body,
-    color: colors.textMuted,
-  },
   tabBar: {
-    paddingTop: 8,
+    position: "absolute",
+    left: 10,
+    right: 10,
+    bottom: 10,
+    paddingTop: 0,
     backgroundColor: colors.surface,
     borderTopColor: colors.border,
+    borderTopWidth: 1,
+    borderRadius: radius.xl,
+  },
+  tabBarItem: {
+    paddingTop: 0,
+    paddingBottom: 0,
+    justifyContent: "center",
+  },
+  tabBarIconSlot: {
+    marginTop: 0,
+    marginBottom: 0,
   },
   tabBarLabel: {
     fontFamily: typography.medium,
     fontSize: 11,
+    marginTop: 2,
+    paddingBottom: 0,
   },
   tabIcon: {
     width: 28,

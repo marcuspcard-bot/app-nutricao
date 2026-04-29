@@ -137,12 +137,8 @@ export async function listCommunityPosts(options = {}) {
 
     likedPostIds = new Set((myLikeRows ?? []).map((item) => item.post_id))
     savedPostIds = new Set((savedRows ?? []).map((item) => item.post_id))
-
-    const commentUserIds = [...new Set((commentRows ?? []).map((item) => item.user_id).filter(Boolean))]
-    const commentProfilesByUserId = await getProfilesMap(commentUserIds)
-    const commentsByPostId = (commentRows ?? []).reduce((acc, item) => {
-      if (!acc[item.post_id]) acc[item.post_id] = []
-      acc[item.post_id].push(mapCommentRow(item, commentProfilesByUserId))
+    const commentsCountByPostId = (commentRows ?? []).reduce((acc, item) => {
+      acc[item.post_id] = (acc[item.post_id] ?? 0) + 1
       return acc
     }, {})
 
@@ -152,8 +148,8 @@ export async function listCommunityPosts(options = {}) {
         likes: likesByPostId[row.id] ?? 0,
         likedByMe: likedPostIds.has(row.id),
         savedByMe: savedPostIds.has(row.id),
-        comments: commentsByPostId[row.id] ?? [],
-        commentsCount: (commentsByPostId[row.id] ?? []).length,
+        comments: [],
+        commentsCount: commentsCountByPostId[row.id] ?? 0,
       })),
       hasMore: (data ?? []).length === limit,
       error: null,
@@ -169,6 +165,35 @@ export async function listCommunityPosts(options = {}) {
       comments: [],
       commentsCount: 0,
     })),
+    hasMore: (data ?? []).length === limit,
+    error: null,
+  }
+}
+
+export async function listCommunityComments(postId, options = {}) {
+  if (!hasSupabaseConfig || !supabase || !postId) {
+    return { comments: [], error: null, hasMore: false }
+  }
+
+  const limit = Number(options.limit ?? 5)
+  const offset = Number(options.offset ?? 0)
+
+  const { data, error } = await supabase
+    .from("community_post_comments")
+    .select("id, post_id, user_id, body, created_at")
+    .eq("post_id", postId)
+    .order("created_at", { ascending: true })
+    .range(offset, offset + limit - 1)
+
+  if (error) {
+    return { comments: [], error, hasMore: false }
+  }
+
+  const commentUserIds = [...new Set((data ?? []).map((item) => item.user_id).filter(Boolean))]
+  const commentProfilesByUserId = await getProfilesMap(commentUserIds)
+
+  return {
+    comments: (data ?? []).map((row) => mapCommentRow(row, commentProfilesByUserId)),
     hasMore: (data ?? []).length === limit,
     error: null,
   }

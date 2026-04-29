@@ -16,6 +16,7 @@ export const useUserStore = create(
       tdee: 0,
       caloriasObjetivo: 0,
       isPremium: false,
+      premiumBillingCycle: "monthly",
 
       setNome: (nome) => set({ nome }),
       setIdade: (idade) => set({ idade }),
@@ -25,6 +26,12 @@ export const useUserStore = create(
       setAtividade: (atividade) => set({ atividade }),
       setObjetivo: (objetivo) => set({ objetivo }),
       setPremium: (isPremium) => set({ isPremium }),
+      setPremiumBillingCycle: (premiumBillingCycle) => set({ premiumBillingCycle }),
+      setPremiumSubscription: ({ isPremium, premiumBillingCycle }) =>
+        set({
+          isPremium,
+          premiumBillingCycle,
+        }),
       setCalculoMetabolico: ({ tmb, tdee, caloriasObjetivo }) =>
         set({ tmb, tdee, caloriasObjetivo }),
       setPerfil: (perfil) =>
@@ -40,6 +47,7 @@ export const useUserStore = create(
           tdee: perfil.tdee ?? 0,
           caloriasObjetivo: perfil.calorias_objetivo ?? perfil.caloriasObjetivo ?? 0,
           isPremium: perfil.is_premium ?? perfil.isPremium ?? false,
+          premiumBillingCycle: perfil.premium_billing_cycle ?? perfil.premiumBillingCycle ?? "monthly",
         }),
       resetOnboarding: () =>
         set({
@@ -54,6 +62,7 @@ export const useUserStore = create(
           tdee: 0,
           caloriasObjetivo: 0,
           isPremium: false,
+          premiumBillingCycle: "monthly",
         }),
     }),
     {

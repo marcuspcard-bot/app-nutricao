@@ -69,12 +69,13 @@ const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
     justifyContent: "center",
-    padding: spacing.lg,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.md,
   },
   card: {
     borderRadius: radius.xl,
     backgroundColor: colors.surface,
-    padding: spacing.xl,
+    padding: spacing.lg,
     gap: spacing.lg,
     ...shadow.card,
   },

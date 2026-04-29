@@ -42,6 +42,46 @@ export function Card({ children, style }) {
   return <View style={[styles.card, style]}>{children}</View>
 }
 
+export function SurfaceBox({ children, style, tone = "muted", compact = false }) {
+  const toneStyle =
+    tone === "soft"
+      ? styles.surfaceBoxSoft
+      : tone === "default"
+        ? styles.surfaceBoxDefault
+        : styles.surfaceBoxMuted
+
+  return (
+    <View style={[styles.surfaceBox, compact ? styles.surfaceBoxCompact : styles.surfaceBoxRegular, toneStyle, style]}>
+      {children}
+    </View>
+  )
+}
+
+export function SurfacePressable({ children, onPress, style, tone = "muted", compact = false, disabled = false }) {
+  const toneStyle =
+    tone === "soft"
+      ? styles.surfaceBoxSoft
+      : tone === "default"
+        ? styles.surfaceBoxDefault
+        : styles.surfaceBoxMuted
+
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={({ pressed }) => [
+        styles.surfaceBox,
+        compact ? styles.surfaceBoxCompact : styles.surfaceBoxRegular,
+        toneStyle,
+        pressed && !disabled && styles.buttonPressed,
+        style,
+      ]}
+    >
+      {children}
+    </Pressable>
+  )
+}
+
 export function Button({ label, onPress, variant = "primary", disabled = false, style }) {
   return (
     <Pressable
@@ -197,7 +237,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   pageContent: {
-    padding: spacing.lg,
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xs,
     gap: spacing.md,
   },
   card: {
@@ -206,6 +248,28 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     gap: spacing.sm,
     ...shadow.card,
+  },
+  surfaceBox: {
+    borderRadius: radius.lg,
+    gap: spacing.xs,
+  },
+  surfaceBoxRegular: {
+    padding: spacing.md,
+  },
+  surfaceBoxCompact: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+  },
+  surfaceBoxMuted: {
+    backgroundColor: colors.surfaceMuted,
+  },
+  surfaceBoxSoft: {
+    backgroundColor: colors.brandSoft,
+  },
+  surfaceBoxDefault: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   button: {
     borderRadius: radius.round,
