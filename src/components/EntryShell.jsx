@@ -17,7 +17,7 @@ function EntryShell({
   const progressWidth = step && totalSteps ? `${Math.min(100, Math.round((step / totalSteps) * 100))}%` : "0%"
 
   return (
-    <LinearGradient colors={["#f5f0e8", "#fffaf4", "#eef5ef"]} style={styles.gradient}>
+    <LinearGradient colors={["#f7eddc", "#fff8ef", "#e8f5e8"]} style={styles.gradient}>
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.card}>
@@ -77,10 +77,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     padding: spacing.lg,
     gap: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     ...shadow.card,
   },
   hero: {
-    gap: spacing.md,
+    gap: spacing.sm,
   },
   progressBlock: {
     gap: spacing.sm,
@@ -103,7 +105,7 @@ const styles = StyleSheet.create({
   progressTrack: {
     height: 8,
     borderRadius: 999,
-    backgroundColor: colors.border,
+    backgroundColor: "#dcead8",
     overflow: "hidden",
   },
   progressFill: {
@@ -130,7 +132,9 @@ const styles = StyleSheet.create({
   },
   highlightCard: {
     borderRadius: radius.lg,
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: colors.surfaceWarm,
+    borderWidth: 1,
+    borderColor: colors.accentSoft,
     padding: spacing.md,
     gap: spacing.xs,
   },
@@ -148,6 +152,7 @@ const styles = StyleSheet.create({
   footer: {
     ...typography.bodySmall,
     color: colors.textMuted,
+    textAlign: "center",
   },
 })
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import * as Linking from "expo-linking"
 import { NavigationContainer } from "@react-navigation/native"
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs"
 import { createNativeStackNavigator } from "@react-navigation/native-stack"
@@ -14,14 +15,16 @@ import {
   EvolutionScreen,
   MealPlansScreen,
   MealsOverviewScreen,
-  PlaceholderScreen,
   PremiumScreen,
   RecipeDetailsScreen,
+  SettingsScreen,
+  PlaceholderScreen,
 } from "../mobile/screens/AppScreens"
 import {
   AlturaScreen,
   CalculoMetabolicoScreen,
   CriarContaScreen,
+  ForgotPasswordScreen,
   HomeScreen,
   IdadeScreen,
   LoginScreen,
@@ -29,10 +32,12 @@ import {
   NomeScreen,
   ObjetivoScreen,
   PesoScreen,
+  ResetPasswordScreen,
   SexoScreen,
   TermsScreen,
 } from "../mobile/screens/PublicScreens"
 import AppLoadingScreen from "../components/AppLoadingScreen"
+import { parseAuthCallbackUrl } from "../lib/authRecovery"
 import { colors, radius, typography } from "../mobile/theme"
 import { logError, logInfo } from "../lib/appLogger"
 import { startMeasure, trackScreenMetric } from "../lib/performanceMonitor"
@@ -190,19 +195,13 @@ function PrivateAppGate() {
       />
       <Stack.Screen
         name="Configurações"
-        children={() => (
-          <PlaceholderScreen
-            title="Configurações"
-            description="Área pronta para preferências, planos e personalização futura."
-            bullets={["Preferências da conta", "Assinatura e plano", "Ajustes do sistema"]}
-          />
-        )}
+        component={SettingsScreen}
       />
     </Stack.Navigator>
   )
 }
 
-function PublicNavigator() {
+function PublicNavigator({ onRecoveryComplete }) {
   return (
     <Stack.Navigator
       screenOptions={{
@@ -221,6 +220,13 @@ function PublicNavigator() {
       <Stack.Screen name="Objetivo" component={ObjetivoScreen} />
       <Stack.Screen name="CalculoMetabolico" component={CalculoMetabolicoScreen} />
       <Stack.Screen name="Login" component={LoginScreen} />
+      <Stack.Screen name="RecuperarSenha" component={ForgotPasswordScreen} />
+      <Stack.Screen
+        name="NovaSenha"
+        children={({ navigation }) => (
+          <ResetPasswordScreen navigation={navigation} onRecoveryComplete={onRecoveryComplete} />
+        )}
+      />
       <Stack.Screen name="CriarConta" component={CriarContaScreen} />
     </Stack.Navigator>
   )
@@ -229,9 +235,80 @@ function PublicNavigator() {
 function AppRoutes() {
   const [initializing, setInitializing] = useState(() => hasSupabaseConfig)
   const [session, setSession] = useState(null)
+  const [authFlow, setAuthFlow] = useState("")
   const navigationRef = useRef(null)
+  const navigationReadyRef = useRef(false)
   const activeRouteNameRef = useRef("")
   const transitionMeasureRef = useRef(startMeasure("navigation:bootstrap"))
+  const pendingPublicRouteRef = useRef(null)
+
+  function flushPendingPublicRoute() {
+    if (!navigationReadyRef.current || !navigationRef.current || !pendingPublicRouteRef.current) {
+      return
+    }
+
+    const { name, params } = pendingPublicRouteRef.current
+    pendingPublicRouteRef.current = null
+    navigationRef.current.navigate(name, params)
+  }
+
+  async function handleRecoveryLink(url) {
+    if (!url || !hasSupabaseConfig || !supabase) {
+      return false
+    }
+
+    const params = parseAuthCallbackUrl(url)
+    if (params.type !== "recovery") {
+      return false
+    }
+
+    let authError = null
+
+    if (params.code) {
+      const { error } = await supabase.auth.exchangeCodeForSession(params.code)
+      authError = error
+    } else if (params.access_token && params.refresh_token) {
+      const { error } = await supabase.auth.setSession({
+        access_token: params.access_token,
+        refresh_token: params.refresh_token,
+      })
+      authError = error
+    } else {
+      authError = new Error("Link de recuperação inválido ou incompleto.")
+    }
+
+    if (authError) {
+      logError("Falha ao processar link de recuperação de senha.", {
+        scope: "password-recovery",
+        error: authError,
+      })
+      pendingPublicRouteRef.current = {
+        name: "RecuperarSenha",
+      }
+      setAuthFlow("")
+      return true
+    }
+
+    setAuthFlow("recovery")
+    pendingPublicRouteRef.current = {
+      name: "NovaSenha",
+    }
+    return true
+  }
+
+  async function finishRecoveryFlow() {
+    setAuthFlow("")
+
+    if (hasSupabaseConfig && supabase) {
+      await supabase.auth.signOut()
+    } else {
+      setSession(null)
+    }
+
+    pendingPublicRouteRef.current = {
+      name: "Login",
+    }
+  }
 
   useEffect(() => {
     if (!hasSupabaseConfig || !supabase) {
@@ -278,7 +355,13 @@ function AppRoutes() {
 
     loadSession()
 
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: subscription } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setAuthFlow("recovery")
+        pendingPublicRouteRef.current = {
+          name: "NovaSenha",
+        }
+      }
       finishBootstrap(nextSession ?? null)
     })
 
@@ -290,6 +373,39 @@ function AppRoutes() {
       subscription.subscription.unsubscribe()
     }
   }, [])
+
+  useEffect(() => {
+    if (!hasSupabaseConfig || !supabase) {
+      return undefined
+    }
+
+    let isMounted = true
+
+    async function handleInitialUrl() {
+      const initialUrl = await Linking.getInitialURL()
+      if (!isMounted || !initialUrl) {
+        return
+      }
+
+      await handleRecoveryLink(initialUrl)
+    }
+
+    function handleIncomingUrl({ url }) {
+      handleRecoveryLink(url)
+    }
+
+    handleInitialUrl()
+    const subscription = Linking.addEventListener("url", handleIncomingUrl)
+
+    return () => {
+      isMounted = false
+      subscription.remove()
+    }
+  }, [])
+
+  useEffect(() => {
+    flushPendingPublicRoute()
+  }, [authFlow, session, initializing])
 
   const navTheme = useMemo(
     () => ({
@@ -321,6 +437,7 @@ function AppRoutes() {
       ref={navigationRef}
       theme={navTheme}
       onReady={() => {
+        navigationReadyRef.current = true
         const route = navigationRef.current?.getCurrentRoute()
         const routeName = route?.name ?? "unknown"
         activeRouteNameRef.current = routeName
@@ -339,6 +456,7 @@ function AppRoutes() {
           routeName,
           durationMs: completed.durationMs,
         })
+        flushPendingPublicRoute()
       }}
       onStateChange={() => {
         const route = navigationRef.current?.getCurrentRoute()
@@ -369,9 +487,10 @@ function AppRoutes() {
         transitionMeasureRef.current = startMeasure(`navigation:${nextRouteName}`, {
           from: previousRouteName,
         })
+        flushPendingPublicRoute()
       }}
     >
-      {session ? <PrivateNavigator /> : <PublicNavigator />}
+      {session && authFlow !== "recovery" ? <PrivateNavigator /> : <PublicNavigator onRecoveryComplete={finishRecoveryFlow} />}
     </NavigationContainer>
   )
 }

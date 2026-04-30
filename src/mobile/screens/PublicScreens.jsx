@@ -1,6 +1,7 @@
 import { useState } from "react"
-import { Modal, ScrollView, StyleSheet, Switch, Text, View } from "react-native"
+import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native"
 import EntryShell from "../../components/EntryShell"
+import { getAuthRedirectUrl } from "../../lib/authRecovery"
 import { getPerfil, upsertPerfil } from "../../lib/profileService"
 import { hasSupabaseConfig, supabase } from "../../lib/supabaseClient"
 import { useUserStore } from "../../store/userStore"
@@ -165,23 +166,23 @@ export function HomeScreen({ navigation }) {
 
   return (
     <EntryShell
-      eyebrow="Nutrição inteligente"
-      title="Painel nutricional pronto para celular"
-      description="Organize sua alimentação, acompanhe sua evolução e monte refeições com uma experiência pensada para o celular."
-      footer="Escolha como deseja começar e siga com uma jornada mais organizada desde o primeiro acesso."
+      eyebrow="Acompanhamento nutricional"
+      title="Seu painel nutricional"
+      description="Plano, check-ins e evolução em um só lugar."
+      footer="Entre na sua conta ou comece um novo cadastro."
       highlights={[
-        { title: "Check-ins semanais", description: "Peso e histórico reunidos em um acompanhamento simples." },
-        { title: "Cardápios por refeição", description: "Receitas distribuídas por momento do dia e objetivo." },
+        { title: "Check-ins", description: "Peso e progresso organizados com clareza." },
+        { title: "Cardápios", description: "Refeições separadas por objetivo e momento do dia." },
       ]}
     >
       <Button
-        label="Iniciar novo acompanhamento"
+        label="Começar cadastro"
         onPress={() => {
           resetOnboarding()
           navigation.navigate("Terms")
         }}
       />
-      <Button label="Acessar minha conta" variant="secondary" onPress={() => navigation.navigate("Login")} />
+      <Button label="Entrar na conta" variant="secondary" onPress={() => navigation.navigate("Login")} />
     </EntryShell>
   )
 }
@@ -527,12 +528,17 @@ export function CalculoMetabolicoScreen({ navigation }) {
 }
 
 function AuthForm({
+  eyebrow = "Acesso",
   title,
   description,
   buttonLabel,
   secondaryLabel,
   secondaryAction,
   submitAction,
+  footer = "",
+  highlights = [],
+  helperActionLabel = "",
+  onHelperAction,
 }) {
   const [email, setEmail] = useState("")
   const [senha, setSenha] = useState("")
@@ -578,14 +584,11 @@ function AuthForm({
 
   return (
     <EntryShell
-      eyebrow="Acesso"
+      eyebrow={eyebrow}
       title={title}
       description={description}
-      footer="Se este for seu primeiro acesso, crie uma conta para salvar sua evolução e organizar sua rotina."
-      highlights={[
-        { title: "Histórico sincronizado", description: "Check-ins e dados da sua jornada reunidos com segurança." },
-        { title: "Acesso direto", description: "Entre com e-mail e senha para retomar seu painel sem etapas extras." },
-      ]}
+      footer={footer}
+      highlights={highlights}
     >
       <InputField
         label="E-mail"
@@ -603,6 +606,11 @@ function AuthForm({
         secureTextEntry
         autoCapitalize="none"
       />
+      {helperActionLabel && onHelperAction ? (
+        <Pressable onPress={onHelperAction} style={({ pressed }) => [styles.inlineLinkWrap, pressed && styles.inlineLinkPressed]}>
+          <Text style={styles.inlineLink}>{helperActionLabel}</Text>
+        </Pressable>
+      ) : null}
       <Feedback message={erro} />
       {mensagem ? <StatusCard tone="success" title={mensagem} /> : null}
       <Button label={loading ? "Processando..." : buttonLabel} onPress={onSubmit} disabled={loading} />
@@ -644,12 +652,167 @@ export function LoginScreen({ navigation }) {
   return (
     <AuthForm
       title="Acesse seu painel"
-      description="Retome seu acompanhamento com histórico, cardápios e dados pessoais sincronizados em um único lugar."
+      description="Entre com seu e-mail e senha."
       buttonLabel="Entrar"
       secondaryLabel="Criar nova conta"
       secondaryAction={{ navigation, action: () => navigation.navigate("CriarConta") }}
       submitAction={submitAction}
+      helperActionLabel="Esqueceu sua senha?"
+      onHelperAction={() => navigation.navigate("RecuperarSenha")}
     />
+  )
+}
+
+export function ForgotPasswordScreen({ navigation }) {
+  const [email, setEmail] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [erro, setErro] = useState("")
+  const [mensagem, setMensagem] = useState("")
+
+  async function enviarRecuperacao() {
+    const normalizedEmail = normalizeEmail(email)
+
+    if (!normalizedEmail) {
+      setErro("Preencha seu e-mail para continuar.")
+      return
+    }
+
+    if (!hasSupabaseConfig || !supabase) {
+      setErro("Conexão com o Supabase não configurada. Revise as variáveis EXPO_PUBLIC para continuar.")
+      return
+    }
+
+    setLoading(true)
+    setErro("")
+    setMensagem("")
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+        redirectTo: getAuthRedirectUrl(),
+      })
+
+      if (error) {
+        setErro("Não foi possível enviar o e-mail de recuperação agora. Tente novamente.")
+        return
+      }
+
+      setMensagem("Enviamos o link de recuperação para o seu e-mail.")
+    } catch (error) {
+      setErro(error?.message ?? "Ocorreu um erro ao solicitar a recuperação de senha.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <EntryShell
+      eyebrow="Recuperar acesso"
+      title="Esqueceu sua senha?"
+      description="Informe seu e-mail para receber o link de recuperação."
+      footer="Depois de abrir o link no e-mail, você volta para o app para criar uma nova senha."
+    >
+      <InputField
+        label="E-mail"
+        value={email}
+        onChangeText={setEmail}
+        placeholder="voce@exemplo.com"
+        keyboardType="email-address"
+        autoCapitalize="none"
+      />
+      <Feedback message={erro} />
+      {mensagem ? <StatusCard tone="success" title={mensagem} /> : null}
+      <Button label={loading ? "Enviando..." : "Enviar link"} onPress={enviarRecuperacao} disabled={loading} />
+      <Button label="Voltar para login" variant="ghost" onPress={() => navigation.navigate("Login")} />
+    </EntryShell>
+  )
+}
+
+export function ResetPasswordScreen({ navigation, onRecoveryComplete }) {
+  const [senha, setSenha] = useState("")
+  const [confirmacao, setConfirmacao] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [erro, setErro] = useState("")
+  const [mensagem, setMensagem] = useState("")
+
+  async function salvarNovaSenha() {
+    const normalizedSenha = String(senha ?? "").trim()
+    const normalizedConfirmacao = String(confirmacao ?? "").trim()
+
+    if (!normalizedSenha) {
+      setErro("Digite sua nova senha.")
+      return
+    }
+
+    if (normalizedSenha.length < 6) {
+      setErro("Use pelo menos 6 caracteres na nova senha.")
+      return
+    }
+
+    if (normalizedSenha !== normalizedConfirmacao) {
+      setErro("As senhas não coincidem.")
+      return
+    }
+
+    if (!hasSupabaseConfig || !supabase) {
+      setErro("Conexão com o Supabase não configurada. Revise as variáveis EXPO_PUBLIC para continuar.")
+      return
+    }
+
+    setLoading(true)
+    setErro("")
+    setMensagem("")
+
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: normalizedSenha,
+      })
+
+      if (error) {
+        setErro("Não foi possível atualizar sua senha agora. Tente novamente.")
+        return
+      }
+
+      setMensagem("Senha atualizada com sucesso.")
+
+      setTimeout(async () => {
+        if (onRecoveryComplete) {
+          await onRecoveryComplete()
+        }
+        navigation.navigate("Login")
+      }, 600)
+    } catch (error) {
+      setErro(error?.message ?? "Ocorreu um erro ao atualizar sua senha.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <EntryShell
+      eyebrow="Nova senha"
+      title="Defina uma nova senha"
+      description="Escolha uma senha segura para voltar ao seu painel."
+    >
+      <InputField
+        label="Nova senha"
+        value={senha}
+        onChangeText={setSenha}
+        placeholder="Digite sua nova senha"
+        secureTextEntry
+        autoCapitalize="none"
+      />
+      <InputField
+        label="Confirmar senha"
+        value={confirmacao}
+        onChangeText={setConfirmacao}
+        placeholder="Repita a nova senha"
+        secureTextEntry
+        autoCapitalize="none"
+      />
+      <Feedback message={erro} />
+      {mensagem ? <StatusCard tone="success" title={mensagem} /> : null}
+      <Button label={loading ? "Salvando..." : "Salvar nova senha"} onPress={salvarNovaSenha} disabled={loading} />
+    </EntryShell>
   )
 }
 
@@ -698,6 +861,11 @@ export function CriarContaScreen({ navigation }) {
       secondaryLabel="Voltar para login"
       secondaryAction={{ navigation, action: () => navigation.navigate("Login") }}
       submitAction={submitAction}
+      footer="Use seu e-mail para criar o acesso."
+      highlights={[
+        { title: "Histórico salvo", description: "Seus dados ficam prontos para acompanhar a evolução." },
+        { title: "Acesso rápido", description: "Entre depois com e-mail e senha." },
+      ]}
     />
   )
 }
@@ -764,5 +932,17 @@ const styles = StyleSheet.create({
   metricValue: {
     ...typography.h3,
     color: colors.text,
+  },
+  inlineLinkWrap: {
+    alignSelf: "flex-end",
+    paddingVertical: 2,
+  },
+  inlineLinkPressed: {
+    opacity: 0.75,
+  },
+  inlineLink: {
+    ...typography.bodySmall,
+    color: colors.brandDark,
+    fontWeight: "600",
   },
 })

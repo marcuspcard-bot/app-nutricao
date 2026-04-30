@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react"
-import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs"
+import { useContext, useEffect, useMemo, useRef, useState } from "react"
+import { BottomTabBarHeightContext } from "@react-navigation/bottom-tabs"
+import { Ionicons } from "@expo/vector-icons"
 import { FlatList, Image, ImageBackground, LayoutAnimation, Modal, Pressable, StyleSheet, Text, UIManager, View } from "react-native"
 import * as ImagePicker from "expo-image-picker"
 import { LinearGradient } from "expo-linear-gradient"
 import Svg, { Circle, Line, Polyline } from "react-native-svg"
-import { Page, Button, Card, Chip, EmptyStateCard, InputField, MetricTile, ProgressBar, SectionHeader, StatusCard, SurfaceBox, SurfacePressable } from "../ui"
-import { colors, radius, spacing, typography } from "../theme"
+import { Page, Button, Card, Chip, EmptyStateCard, InputField, MetricTile, ProgressBar, ScreenIntroCard, SectionCard, SectionHeader, StatusCard, SurfaceBox, SurfacePressable } from "../ui"
+import { colors, radius, shadow, spacing, typography } from "../theme"
 import { useAppDataContext } from "../AppDataContext"
 import AppLoadingScreen from "../../components/AppLoadingScreen"
 import { formatShortDate, getChartPointPosition } from "../appDataUtils"
@@ -23,6 +24,56 @@ import { useScreenPerformance } from "../useScreenPerformance"
 
 const MEAL_PLAN_MAX_AGE_MS = 30 * 60 * 1000
 const RECIPE_MAX_AGE_MS = 6 * 60 * 60 * 1000
+const activityOptions = [
+  { value: "sedentario", label: "Sedentário" },
+  { value: "leve", label: "Leve" },
+  { value: "moderado", label: "Moderado" },
+  { value: "alto", label: "Alto" },
+  { value: "muito_alto", label: "Muito alto" },
+]
+const objectiveOptions = [
+  { value: "emagrecer", label: "Emagrecimento" },
+  { value: "manter", label: "Manutenção" },
+  { value: "ganhar_massa", label: "Ganho de massa" },
+]
+const dashboardQuickActions = [
+  {
+    key: "checkin",
+    title: "Registrar check-in",
+    copy: "Atualize peso e progresso semanal.",
+    eyebrow: "Progresso",
+    icon: "pulse",
+    tone: "soft",
+    route: "Checkin",
+  },
+  {
+    key: "meal-plans",
+    title: "Abrir cardápios",
+    copy: "Veja refeições e receitas do seu plano.",
+    eyebrow: "Plano alimentar",
+    icon: "restaurant",
+    tone: "soft",
+    route: "MealPlans",
+  },
+  {
+    key: "goals",
+    title: "Metas",
+    copy: "Acompanhe marcos e próximos passos.",
+    eyebrow: "Objetivos",
+    icon: "flag",
+    tone: "soft",
+    route: "Metas",
+  },
+  {
+    key: "routine",
+    title: "Rotina",
+    copy: "Organize lembretes e compromissos.",
+    eyebrow: "Planejamento",
+    icon: "calendar",
+    tone: "soft",
+    route: "Agenda",
+  },
+]
 
 if (UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true)
@@ -44,6 +95,75 @@ function normalizeText(value) {
     .trim()
 }
 
+function normalizeMealPlan(plan) {
+  const normalizedPlan = {}
+
+  for (const mealKey of Object.keys(mealLabels)) {
+    const recipes = plan?.[mealKey]
+    normalizedPlan[mealKey] = Array.isArray(recipes) ? recipes : []
+  }
+
+  return normalizedPlan
+}
+
+function parsePositiveNumber(value) {
+  const normalized = String(value ?? "").trim().replace(",", ".")
+  const parsed = Number(normalized)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function normalizeIntegerInput(value) {
+  return String(value ?? "").replace(/[^\d]/g, "")
+}
+
+function normalizeDecimalInput(value) {
+  const sanitized = String(value ?? "")
+    .trim()
+    .replace(",", ".")
+    .replace(/[^\d.]/g, "")
+
+  const [integerPart = "", ...decimalParts] = sanitized.split(".")
+  const decimalPart = decimalParts.join("")
+
+  return decimalPart ? `${integerPart}.${decimalPart}` : integerPart
+}
+
+function calculateMetabolicData({ idade, peso, altura, sexo, atividade, objetivo }) {
+  const idadeNum = parsePositiveNumber(idade)
+  const pesoNum = parsePositiveNumber(peso)
+  const alturaNum = parsePositiveNumber(altura)
+
+  if (!idadeNum || !pesoNum || !alturaNum || !sexo) {
+    return {
+      tmb: 0,
+      tdee: 0,
+      caloriasObjetivo: 0,
+    }
+  }
+
+  const tmb =
+    sexo === "masculino"
+      ? 10 * pesoNum + 6.25 * alturaNum - 5 * idadeNum + 5
+      : 10 * pesoNum + 6.25 * alturaNum - 5 * idadeNum - 161
+
+  let fatorAtividade = 1.2
+  if (atividade === "leve") fatorAtividade = 1.375
+  if (atividade === "moderado") fatorAtividade = 1.55
+  if (atividade === "alto") fatorAtividade = 1.725
+  if (atividade === "muito_alto") fatorAtividade = 1.9
+
+  const tdee = tmb * fatorAtividade
+  let caloriasObjetivo = tdee
+  if (objetivo === "emagrecer") caloriasObjetivo = tdee - 400
+  if (objetivo === "ganhar_massa") caloriasObjetivo = tdee + 400
+
+  return {
+    tmb: Math.round(tmb),
+    tdee: Math.round(tdee),
+    caloriasObjetivo: Math.round(caloriasObjetivo),
+  }
+}
+
 function MetricGrid({ items }) {
   return (
     <View style={styles.metricGrid}>
@@ -59,7 +179,7 @@ function HeroCard({ children, style }) {
 }
 
 function TabPage({ children, contentContainerStyle, ...props }) {
-  const tabBarHeight = useBottomTabBarHeight()
+  const tabBarHeight = useContext(BottomTabBarHeightContext) ?? 0
 
   return (
     <Page
@@ -76,7 +196,7 @@ function TabPage({ children, contentContainerStyle, ...props }) {
   )
 }
 
-function MealProgressCard({ meal, totalCalories }) {
+function MealProgressCard({ meal, totalCalories, onPress }) {
   const maxCalories = totalCalories || 1
   const progress = Math.max(0, Math.min(1, (meal.kcal || 0) / maxCalories))
   const size = 76
@@ -123,21 +243,52 @@ function MealProgressCard({ meal, totalCalories }) {
 
   if (meal.imageUrl) {
     return (
-      <ImageBackground
-        source={{ uri: meal.imageUrl }}
-        style={styles.mealProgressCard}
-        imageStyle={styles.mealProgressImage}
-        resizeMode="cover"
+      <Pressable
+        onPress={onPress}
+        style={({ pressed }) => [styles.mealProgressCard, pressed && styles.buttonPressed]}
       >
-        <View style={styles.mealProgressOverlay}>{content}</View>
-      </ImageBackground>
+        <ImageBackground
+          source={{ uri: meal.imageUrl }}
+          style={styles.mealProgressCardFill}
+          imageStyle={styles.mealProgressImage}
+          resizeMode="cover"
+        >
+          <View style={styles.mealProgressOverlay}>{content}</View>
+        </ImageBackground>
+      </Pressable>
     )
   }
 
   return (
-    <View style={[styles.mealProgressCard, styles.mealProgressCardFallback]}>
-      <View style={styles.mealProgressOverlayFallback}>{content}</View>
-    </View>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.mealProgressCard, styles.mealProgressCardFallback, pressed && styles.buttonPressed]}
+    >
+      <View style={styles.mealProgressCardFill}>
+        <View style={styles.mealProgressOverlayFallback}>{content}</View>
+      </View>
+    </Pressable>
+  )
+}
+
+function QuickActionCard({ title, copy, eyebrow, icon, tone, onPress }) {
+  const iconWrapStyle = tone === "soft" ? styles.dashboardActionIconSoft : styles.dashboardActionIconDefault
+  const iconColor = colors.brandDark
+
+  return (
+    <SurfacePressable onPress={onPress} style={styles.dashboardActionCard} tone={tone}>
+      <View style={styles.dashboardActionTopRow}>
+        <View style={[styles.dashboardActionIconWrap, iconWrapStyle]}>
+          <Ionicons name={icon} size={18} color={iconColor} />
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+      </View>
+      <View style={styles.dashboardActionContent}>
+        <Text style={styles.dashboardActionEyebrow}>{eyebrow}</Text>
+        <Text style={styles.dashboardActionTitle}>{title}</Text>
+        <Text style={styles.dashboardActionCopy}>{copy}</Text>
+      </View>
+    </SurfacePressable>
   )
 }
 
@@ -228,7 +379,12 @@ function CommunityPostCard({
         </View>
         <View style={styles.communityMeta}>
           <Text style={styles.communityAuthor}>{post.author}</Text>
-          <Text style={styles.communityPostInfo}>{post.mealLabel} • {post.postedAt}</Text>
+          <View style={styles.communityMetaRow}>
+            <Text style={styles.communityPostInfo}>{post.postedAt}</Text>
+            <View style={styles.communityMealBadge}>
+              <Text style={styles.communityMealBadgeText}>{post.mealLabel}</Text>
+            </View>
+          </View>
         </View>
         <View style={styles.communityPostMenu}>
           <Text style={styles.communityPostMenuText}>•••</Text>
@@ -275,11 +431,17 @@ function CommunityPostCard({
         </View>
       ) : (
         <>
-          <Text style={styles.communityCaption}>{post.caption}</Text>
-          <Text style={styles.communityBody}>{post.body}</Text>
           {post.imageUrl ? <Image source={{ uri: post.imageUrl }} style={styles.communityPostImage} /> : null}
+          <View style={styles.communityPostContent}>
+            <Text style={styles.communityCaption}>{post.caption}</Text>
+            <Text style={styles.communityBody}>{post.body}</Text>
+          </View>
         </>
       )}
+      <View style={styles.communityPostStats}>
+        <Text style={styles.communityPostStatsText}>{post.likes ?? 0} curtidas</Text>
+        <Text style={styles.communityPostStatsText}>{post.commentsCount ?? 0} comentários</Text>
+      </View>
       <View style={styles.communityActions}>
         <Chip
           label={
@@ -443,24 +605,19 @@ export function DashboardScreen({ navigation }) {
       </HeroCard>
 
       <Card style={styles.dashboardSectionCard}>
-        <SectionHeader title="Acoes rapidas" helper="Atalhos principais para manter sua rotina em movimento." />
+        <SectionHeader title="Acoes rapidas" helper="Atalhos principais para cuidar do plano e da rotina." />
         <View style={styles.dashboardActionGrid}>
-          <SurfacePressable onPress={() => navigation.navigate("Checkin")} style={styles.dashboardActionCard}>
-            <Text style={styles.dashboardActionTitle}>Registrar check-in</Text>
-            <Text style={styles.dashboardActionCopy}>Atualize peso e progresso semanal.</Text>
-          </SurfacePressable>
-          <SurfacePressable onPress={() => navigation.navigate("MealPlans")} style={styles.dashboardActionCard}>
-            <Text style={styles.dashboardActionTitle}>Abrir cardápios</Text>
-            <Text style={styles.dashboardActionCopy}>Veja refeições e receitas do seu plano.</Text>
-          </SurfacePressable>
-          <SurfacePressable onPress={() => navigation.navigate("Metas")} style={styles.dashboardActionCard}>
-            <Text style={styles.dashboardActionTitle}>Metas</Text>
-            <Text style={styles.dashboardActionCopy}>Acompanhe marcos e proximos passos.</Text>
-          </SurfacePressable>
-          <SurfacePressable onPress={() => navigation.navigate("Agenda")} style={styles.dashboardActionCard}>
-            <Text style={styles.dashboardActionTitle}>Rotina</Text>
-            <Text style={styles.dashboardActionCopy}>Organize lembretes e compromissos.</Text>
-          </SurfacePressable>
+          {dashboardQuickActions.map((action) => (
+            <QuickActionCard
+              key={action.key}
+              title={action.title}
+              copy={action.copy}
+              eyebrow={action.eyebrow}
+              icon={action.icon}
+              tone={action.tone}
+              onPress={() => navigation.navigate(action.route)}
+            />
+          ))}
         </View>
       </Card>
 
@@ -500,17 +657,26 @@ export function MealsOverviewScreen({ navigation }) {
 
   return (
     <TabPage>
-      <Card>
-        <SectionHeader title="Abrir cardápios" helper="Entre nos planos completos organizados por refeição." />
+      <ScreenIntroCard
+        eyebrow="Refeicoes"
+        title="Plano do dia em blocos simples"
+        description="Navegue pelas refeições do seu plano com a mesma estrutura visual das outras áreas do app."
+      >
         <Button label="Ver todos os cardápios" onPress={() => navigation.navigate("MealPlans")} />
-      </Card>
+      </ScreenIntroCard>
 
-      <Card>
-        <SectionHeader title="Plano do dia" helper="Distribuição estimada por refeição." />
+      <SectionCard title="Plano do dia" helper="Distribuição estimada por refeição.">
         <View style={styles.mealPillGrid}>
-          {meals.map((meal) => <MealProgressCard key={meal.key} meal={meal} totalCalories={caloriasObjetivo} />)}
+          {meals.map((meal) => (
+            <MealProgressCard
+              key={meal.key}
+              meal={meal}
+              totalCalories={caloriasObjetivo}
+              onPress={() => navigation.navigate("MealPlans")}
+            />
+          ))}
         </View>
-      </Card>
+      </SectionCard>
     </TabPage>
   )
 }
@@ -818,45 +984,46 @@ export function CommunityScreen() {
   }
 
   return (
-    <Page
+    <TabPage
       scrollProps={{
         onScroll: handleCommunityScroll,
         scrollEventThrottle: 16,
       }}
     >
-      <Card style={styles.communityShell}>
-        <View style={styles.communityTopBar}>
-          <View style={styles.communityTitleWrap}>
-            <Text style={styles.communitySectionLabel}>Comunidade</Text>
-            <Text style={styles.communitySectionTitle}>Feed de refeições e rotina</Text>
-            <Text style={styles.communitySectionSubtitle}>Novos posts aparecem automaticamente conforme a comunidade publica.</Text>
-          </View>
-        </View>
-
-        <View style={styles.communityComposerEntry}>
-          <Pressable onPress={() => setIsComposerOpen((current) => !current)} style={styles.communityComposerPromptButton}>
-            <View style={styles.communityComposerAvatar}>
-              <Text style={styles.communityComposerAvatarText}>{composerName.charAt(0).toUpperCase()}</Text>
+      <HeroCard style={styles.communityHeroCard}>
+        <LinearGradient colors={["#18392c", "#275642", "#4f826a"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.communityHeroGradient}>
+          <View style={styles.communityTopBar}>
+            <View style={styles.communityTitleWrap}>
+              <Text style={styles.communitySectionLabelOnDark}>Comunidade</Text>
+              <Text style={styles.communitySectionTitleOnDark}>Feed de refeições e rotina</Text>
             </View>
-            <View style={styles.communityComposerPrompt}>
-              <Text style={styles.communityComposerPromptTitle}>No que você está pensando?</Text>
-              <Text style={styles.communityComposerPromptHint}>Compartilhe uma refeição, dica ou progresso.</Text>
-            </View>
-          </Pressable>
-          <View style={styles.communityComposerInlineActions}>
-            <Chip label="Galeria" onPress={() => handleInlineImageAction("gallery")} />
-            <Chip label="Câmera" onPress={() => handleInlineImageAction("camera")} />
-            <Chip label={isComposerOpen ? "Fechar" : "Texto"} active={isComposerOpen} onPress={() => setIsComposerOpen((current) => !current)} />
+            <Chip label={source === "supabase" ? "Ao vivo" : "Local"} active={source === "supabase"} />
           </View>
-        </View>
 
-        <View style={styles.chipRow}>
-          {refreshing ? <Chip label="Atualizando feed..." /> : null}
-          {staleData ? <Chip label="Mostrando dados salvos" tone="warning" /> : null}
-          {source === "supabase" ? <Chip label="Tempo real" active /> : null}
-        </View>
+          <View style={styles.communityComposerEntry}>
+            <Pressable onPress={() => setIsComposerOpen((current) => !current)} style={({ pressed }) => [styles.communityComposerPromptButton, pressed && styles.buttonPressed]}>
+              <View style={styles.communityComposerAvatar}>
+                <Text style={styles.communityComposerAvatarText}>{composerName.charAt(0).toUpperCase()}</Text>
+              </View>
+              <View style={styles.communityComposerPrompt}>
+                <Text style={styles.communityComposerPromptTitle}>Compartilhar no feed</Text>
+                <Text style={styles.communityComposerPromptHint}>Toque para escrever ou adicionar foto.</Text>
+              </View>
+            </Pressable>
+            <View style={styles.communityComposerInlineActions}>
+              <Chip label="Galeria" onPress={() => handleInlineImageAction("gallery")} />
+              <Chip label="Câmera" onPress={() => handleInlineImageAction("camera")} />
+              <Chip label={isComposerOpen ? "Fechar" : "Texto"} active={isComposerOpen} onPress={() => setIsComposerOpen((current) => !current)} />
+            </View>
+          </View>
 
-      </Card>
+          <View style={styles.communityStatusRow}>
+            {refreshing ? <Chip label="Atualizando feed..." /> : null}
+            {staleData ? <Chip label="Mostrando dados salvos" tone="warning" /> : null}
+            {source === "supabase" ? <Chip label="Tempo real" active /> : null}
+          </View>
+        </LinearGradient>
+      </HeroCard>
 
       {loading && !posts.length ? (
         <StatusCard
@@ -870,8 +1037,8 @@ export function CommunityScreen() {
         <Card style={styles.communityComposerCard}>
           <View style={styles.communityComposerCompactHeader}>
             <View style={styles.communityComposerHeader}>
-              <Text style={styles.communityComposerTitle}>Novo post</Text>
-              <Text style={styles.communityComposerHint}>Rápido, direto e sem excesso.</Text>
+              <Text style={styles.communityComposerTitle}>Criar publicação</Text>
+              <Text style={styles.communityComposerHint}>Monte um post com cara de feed: imagem, legenda e contexto.</Text>
             </View>
             <Chip label={selectedMealLabel} active />
           </View>
@@ -947,9 +1114,9 @@ export function CommunityScreen() {
         </Card>
       ) : null}
 
-      <Card style={styles.communityFeedCard}>
+      <View style={styles.communityFeedCard}>
         <View style={styles.communityFeedHeader}>
-          <SectionHeader title="Feed da comunidade" helper="Veja o que outras pessoas estão compartilhando agora." trailing={`${posts.length} posts`} />
+          <SectionHeader title="Feed da comunidade" helper="Um feed visual para navegar pelas publicações mais recentes." trailing={`${posts.length} posts`} />
         </View>
         <FlatList
           data={posts}
@@ -1006,7 +1173,7 @@ export function CommunityScreen() {
             ) : null
           }
         />
-      </Card>
+      </View>
 
       <Modal visible={Boolean(commentsSheetPost)} transparent animationType="slide" onRequestClose={() => setCommentsSheetPostId("")}>
         <View style={styles.commentsModalOverlay}>
@@ -1092,7 +1259,7 @@ export function CommunityScreen() {
           </View>
         </View>
       </Modal>
-    </Page>
+    </TabPage>
   )
 }
 
@@ -1134,8 +1301,13 @@ export function CheckinScreen({ navigation }) {
 
   return (
     <TabPage>
-      <Card>
-        <SectionHeader title="Check-in semanal" helper="Acompanhamento rápido para manter a constância." trailing={history.length ? `${history.length} semanas` : "Novo"} />
+      <ScreenIntroCard
+        eyebrow="Check-in"
+        title="Atualize seu progresso semanal"
+        description="Registre o peso atual para manter evolução, gráfico e histórico em sincronia."
+        trailing={history.length ? `${history.length} semanas` : "Novo"}
+      />
+      <SectionCard title="Check-in semanal" helper="Acompanhamento rápido para manter a constância." trailing={history.length ? `${history.length} semanas` : "Novo"}>
         <InputField
           label="Seu peso atual"
           value={String(pesoCheckin)}
@@ -1146,7 +1318,7 @@ export function CheckinScreen({ navigation }) {
         {feedback ? <StatusCard tone="warning" title="Não foi possível concluir o check-in" description={feedback} /> : null}
         {successMessage ? <StatusCard tone="success" title="Check-in registrado" description={successMessage} /> : null}
         <Button label={savingCheckin ? "Salvando check-in..." : "Salvar check-in"} onPress={salvar} disabled={savingCheckin} />
-      </Card>
+      </SectionCard>
     </TabPage>
   )
 }
@@ -1172,28 +1344,54 @@ function EvolutionChart({ chartPoints, history, checkinsLoading }) {
     .map((point) => point.split(",").map(Number))
     .map(([x, y]) => `${x},${y}`)
     .join(" ")
+  const weights = history.map((item) => Number(item.peso)).filter((value) => Number.isFinite(value))
+  const minWeight = weights.length ? Math.min(...weights) : null
+  const maxWeight = weights.length ? Math.max(...weights) : null
 
   return (
-    <Card>
-      <SectionHeader title="Gráfico de evolução" trailing="Peso semanal" />
-      <Svg width="100%" height={160} viewBox="0 0 280 120">
-        <Line x1="0" y1="112" x2="280" y2="112" stroke="#d8d1c4" strokeWidth="2" />
-        <Polyline points={points} fill="none" stroke={colors.brand} strokeWidth="3" />
+    <Card style={styles.evolutionChartCard}>
+      <View style={styles.evolutionChartHeader}>
+        <View style={styles.evolutionChartHeaderCopy}>
+          <Text style={styles.evolutionSectionEyebrow}>Leitura visual</Text>
+          <Text style={styles.evolutionSectionTitle}>Curva de evolução</Text>
+          <Text style={styles.evolutionSectionHelper}>Acompanhe o comportamento do peso nas últimas semanas com mais contexto.</Text>
+        </View>
+        <View style={styles.evolutionChartRangeBadge}>
+          <Text style={styles.evolutionChartRangeLabel}>Amplitude</Text>
+          <Text style={styles.evolutionChartRangeValue}>
+            {minWeight !== null && maxWeight !== null ? `${minWeight} a ${maxWeight} kg` : "-"}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.evolutionChartShell}>
+        <Svg width="100%" height={176} viewBox="0 0 280 120">
+          <Line x1="0" y1="20" x2="280" y2="20" stroke="#e6dece" strokeWidth="1" strokeDasharray="4 6" />
+          <Line x1="0" y1="66" x2="280" y2="66" stroke="#e6dece" strokeWidth="1" strokeDasharray="4 6" />
+          <Line x1="0" y1="112" x2="280" y2="112" stroke="#d8d1c4" strokeWidth="2" />
+          <Polyline points={points} fill="none" stroke={colors.brand} strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" />
+          {history.map((item, index) => {
+            const { cx, cy } = getChartPointPosition(history, index)
+            return <Circle key={item.id} cx={cx} cy={cy} r="6" fill={colors.surface} stroke={colors.brandDark} strokeWidth="3" />
+          })}
+        </Svg>
+      </View>
+      <View style={styles.evolutionChartFooter}>
         {history.map((item, index) => {
-          const { cx, cy } = getChartPointPosition(history, index)
-          return <Circle key={item.id} cx={cx} cy={cy} r="4" fill={colors.brandDark} />
+          return (
+            <View key={item.id} style={styles.evolutionChartFooterItem}>
+              <Text style={styles.evolutionChartFooterDate}>{formatShortDate(item.date)}</Text>
+              <Text style={[styles.evolutionChartFooterWeight, index === history.length - 1 && styles.evolutionChartFooterWeightActive]}>
+                {item.peso} kg
+              </Text>
+            </View>
+          )
         })}
-      </Svg>
-      <View style={styles.chartLabelRow}>
-        {history.map((item) => (
-          <Text key={item.id} style={styles.chartLabel}>{formatShortDate(item.date)}</Text>
-        ))}
       </View>
     </Card>
   )
 }
 
-export function EvolutionScreen({ route }) {
+export function EvolutionScreen({ navigation, route }) {
   useScreenPerformance("EvolutionScreen")
   const {
     chartPoints,
@@ -1212,6 +1410,31 @@ export function EvolutionScreen({ route }) {
     caloriasObjetivo,
     checkinsLoading,
   } = useAppDataContext()
+  const currentWeightValue = latestCheckin?.peso ?? peso
+  const currentWeightLabel = currentWeightValue ? `${currentWeightValue} kg` : "-"
+  const variationLabel = previousCheckin ? `${weightDelta > 0 ? "+" : ""}${weightDelta} kg` : "-"
+  const trendLabel = !previousCheckin ? "Sem base comparativa" : weightDelta <= 0 ? "Tendência controlada" : "Atenção ao ritmo"
+  const trendCopy = !previousCheckin
+    ? "Assim que houver pelo menos dois registros, a leitura de variação aparece automaticamente."
+    : `A diferença desde o último check-in foi de ${variationLabel}.`
+  const latestCheckinDate = latestCheckin?.date ? formatShortDate(latestCheckin.date) : "Sem registro recente"
+  const cadenceLabel = history.length >= 4 ? "Consistência boa" : history.length >= 2 ? "Em formação" : "Começando agora"
+  const cadenceCopy =
+    history.length >= 4
+      ? "Você já tem uma base útil para perceber tendência e ritmo com mais clareza."
+      : history.length >= 2
+        ? "Continue registrando semanalmente para deixar a curva mais confiável."
+        : "Seu primeiro check-in vai liberar uma visão mais completa da evolução."
+  const profileItems = [
+    { label: "Idade", value: idade || "-" },
+    { label: "Sexo", value: sexo || "-" },
+    { label: "Altura", value: altura ? `${altura} cm` : "-" },
+    { label: "Atividade", value: atividade || "-" },
+    { label: "TMB", value: tmb || "-" },
+    { label: "Gasto diário", value: tdee || "-" },
+    { label: "Meta calórica", value: caloriasObjetivo ? `${caloriasObjetivo} kcal` : "-" },
+    { label: "Objetivo", value: objetivoLabel || "-" },
+  ]
 
   return (
     <TabPage>
@@ -1224,52 +1447,93 @@ export function EvolutionScreen({ route }) {
         />
       ) : null}
 
-      <Card>
-        <SectionHeader title="Evolução recente" helper="Visualize seu progresso com mais clareza e contexto." trailing={history.length ? `${history.length} registros` : "Sem registros"} />
-        <MetricGrid
-          items={[
-            { label: "Peso atual", value: latestCheckin ? `${latestCheckin.peso} kg` : peso ? `${peso} kg` : "-" },
-            { label: "Variação", value: previousCheckin ? `${weightDelta > 0 ? "+" : ""}${weightDelta} kg` : "-" },
-            { label: "Check-ins", value: history.length || "-" },
-          ]}
-        />
-      </Card>
+      <HeroCard style={styles.evolutionHeroCard}>
+        <LinearGradient colors={["#1f4e3a", "#2d6a4f", "#97c7ab"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.evolutionHeroGradient}>
+          <View style={styles.evolutionHeroTopRow}>
+            <View style={styles.evolutionHeroTitleWrap}>
+              <Text style={styles.evolutionHeroEyebrow}>Evolução</Text>
+              <Text style={styles.evolutionHeroTitle}>Progresso com leitura mais clara</Text>
+              <Text style={styles.evolutionHeroSubtitle}>Veja tendência, ritmo de check-ins e contexto metabólico em uma única visão.</Text>
+            </View>
+            <Chip label={history.length ? `${history.length} registros` : "Sem registros"} active />
+          </View>
+
+          <View style={styles.evolutionHeroMetricsRow}>
+            <View style={styles.evolutionHeroMetricCard}>
+              <Text style={styles.evolutionHeroMetricLabel}>Peso atual</Text>
+              <Text style={styles.evolutionHeroMetricValue}>{currentWeightLabel}</Text>
+              <Text style={styles.evolutionHeroMetricHint}>{latestCheckinDate}</Text>
+            </View>
+            <View style={styles.evolutionHeroMetricCard}>
+              <Text style={styles.evolutionHeroMetricLabel}>Variação</Text>
+              <Text style={styles.evolutionHeroMetricValue}>{variationLabel}</Text>
+              <Text style={styles.evolutionHeroMetricHint}>comparado ao último check-in</Text>
+            </View>
+            <View style={styles.evolutionHeroMetricCard}>
+              <Text style={styles.evolutionHeroMetricLabel}>Ritmo</Text>
+              <Text style={styles.evolutionHeroMetricValue}>{history.length || 0}</Text>
+              <Text style={styles.evolutionHeroMetricHint}>check-ins acumulados</Text>
+            </View>
+          </View>
+
+          <View style={styles.evolutionInsightRow}>
+            <View style={styles.evolutionInsightCard}>
+              <Text style={styles.evolutionInsightLabel}>Leitura do momento</Text>
+              <Text style={styles.evolutionInsightTitle}>{trendLabel}</Text>
+              <Text style={styles.evolutionInsightCopy}>{trendCopy}</Text>
+            </View>
+            <Pressable onPress={() => navigation.navigate("Checkin")} style={({ pressed }) => [styles.evolutionHeroAction, pressed && styles.buttonPressed]}>
+              <Text style={styles.evolutionHeroActionLabel}>Ação rápida</Text>
+              <Text style={styles.evolutionHeroActionTitle}>Registrar novo check-in</Text>
+              <Text style={styles.evolutionHeroActionCopy}>Atualize o peso e mantenha o histórico consistente.</Text>
+            </Pressable>
+          </View>
+        </LinearGradient>
+      </HeroCard>
 
       <EvolutionChart chartPoints={chartPoints} history={history} checkinsLoading={checkinsLoading} />
 
-      <Card>
-        <SectionHeader title="Seu resumo corporal" trailing={objetivoLabel} />
-        <MetricGrid
-          items={[
-            { label: "Idade", value: idade || "-" },
-            { label: "Sexo", value: sexo || "-" },
-            { label: "Peso", value: peso ? `${peso} kg` : "-" },
-            { label: "Altura", value: altura ? `${altura} cm` : "-" },
-            { label: "Atividade", value: atividade || "-" },
-            { label: "TMB", value: tmb || "-" },
-            { label: "Gasto diário", value: tdee || "-" },
-            { label: "Meta calórica", value: caloriasObjetivo ? `${caloriasObjetivo} kcal` : "-" },
-          ]}
-        />
+      <Card style={styles.evolutionBodyCard}>
+        <SectionHeader title="Painel corporal" helper="Dados base usados para interpretar seu progresso e suas metas." trailing={objetivoLabel} />
+        <View style={styles.evolutionProfileGrid}>
+          {profileItems.map((item) => (
+            <View key={item.label} style={styles.evolutionProfileTile}>
+              <Text style={styles.evolutionProfileLabel}>{item.label}</Text>
+              <Text style={styles.evolutionProfileValue}>{item.value}</Text>
+            </View>
+          ))}
+        </View>
+        <SurfaceBox style={styles.evolutionCadenceBox} tone="soft">
+          <Text style={styles.evolutionCadenceLabel}>Consistência semanal</Text>
+          <Text style={styles.evolutionCadenceTitle}>{cadenceLabel}</Text>
+          <Text style={styles.evolutionCadenceCopy}>{cadenceCopy}</Text>
+        </SurfaceBox>
       </Card>
 
-      <Card>
-        <SectionHeader title="Histórico recente" trailing="Últimos registros" />
+      <Card style={styles.evolutionBodyCard}>
+        <SectionHeader title="Linha do tempo" helper="Últimos check-ins organizados para leitura rápida." trailing="Histórico recente" />
         {history.length ? [...history].slice(-6).reverse().map((item) => (
-          <SurfaceBox key={item.id} style={styles.historyItem}>
-            <View style={styles.historyCopy}>
-              <Text style={styles.historyTitle}>{item.label}</Text>
-              <Text style={styles.historyDescription}>Registro semanal salvo no Supabase.</Text>
+          <SurfaceBox key={item.id} style={styles.evolutionTimelineItem} tone="default">
+            <View style={styles.evolutionTimelineMarker}>
+              <View style={styles.evolutionTimelineDot} />
             </View>
-            <View>
-              <Text style={styles.historyValue}>{item.peso} kg</Text>
-              <Text style={styles.historyDate}>{formatShortDate(item.date)}</Text>
+            <View style={styles.evolutionTimelineContent}>
+              <View style={styles.evolutionTimelineHeader}>
+                <View style={styles.historyCopy}>
+                  <Text style={styles.historyTitle}>{item.label}</Text>
+                  <Text style={styles.historyDescription}>Registro semanal salvo no Supabase.</Text>
+                </View>
+                <View style={styles.evolutionTimelineValueBlock}>
+                  <Text style={styles.historyValue}>{item.peso} kg</Text>
+                  <Text style={styles.historyDate}>{formatShortDate(item.date)}</Text>
+                </View>
+              </View>
             </View>
           </SurfaceBox>
         )) : (
           <EmptyStateCard
             title="Nenhum check-in registrado ainda"
-            description="Quando o primeiro check-in for salvo, os últimos registros aparecerão aqui com data e peso."
+            description="Quando o primeiro check-in for salvo, a linha do tempo vai organizar os registros por data e peso."
           />
         )}
       </Card>
@@ -1303,7 +1567,7 @@ export function MealPlansScreen({ navigation, route }) {
   const mealKey = route.params?.mealKey ?? ""
   const objetivo = useUserStore((state) => state.objetivo)
   const caloriasObjetivo = useUserStore((state) => state.caloriasObjetivo)
-  const fallbackPlan = useMemo(() => getPlanByObjective(objetivo), [objetivo])
+  const fallbackPlan = useMemo(() => normalizeMealPlan(getPlanByObjective(objetivo)), [objetivo])
   const [plano, setPlano] = useState(fallbackPlan)
   const [loading, setLoading] = useState(true)
   const [initialLoading, setInitialLoading] = useState(true)
@@ -1336,7 +1600,7 @@ export function MealPlansScreen({ navigation, route }) {
       if (!isMounted) return
 
       if (cachedPlan.exists && cachedPlan.data) {
-        setPlano(cachedPlan.data)
+        setPlano(normalizeMealPlan(cachedPlan.data))
         setLoading(false)
         setInitialLoading(false)
       } else {
@@ -1356,7 +1620,7 @@ export function MealPlansScreen({ navigation, route }) {
       if (!isMounted) return
 
       if (result.data) {
-        setPlano(result.data)
+        setPlano(normalizeMealPlan(result.data))
       }
 
       if (result.error && result.fromCache) {
@@ -1382,7 +1646,7 @@ export function MealPlansScreen({ navigation, route }) {
     }
   }, [fallbackPlan, objetivo])
 
-  const mealEntries = Object.entries(plano)
+  const mealEntries = useMemo(() => Object.entries(normalizeMealPlan(plano)), [plano])
   const normalizedQuery = normalizeText(searchQuery)
   const hasActiveFilters =
     normalizedQuery || proteinFilter !== "all" || calorieFilter !== "all" || timeFilter !== "all" || categoryFilter !== "all"
@@ -1391,7 +1655,8 @@ export function MealPlansScreen({ navigation, route }) {
     return mealEntries
       .filter(([currentMealKey]) => !mealKey || currentMealKey === mealKey)
       .map(([currentMealKey, receitas]) => {
-        const filteredRecipes = receitas.filter((receita) => {
+        const safeRecipes = Array.isArray(receitas) ? receitas : []
+        const filteredRecipes = safeRecipes.filter((receita) => {
           const ingredientMatch = (receita.ingredientes ?? []).some((ingrediente) =>
             normalizeText(ingrediente).includes(normalizedQuery),
           )
@@ -1459,21 +1724,24 @@ export function MealPlansScreen({ navigation, route }) {
 
   return (
     <TabPage>
-      <HeroCard>
-        <Text style={styles.eyebrow}>Seu plano diário</Text>
-        <Text style={styles.heroTitle}>{mealKey ? selectedMealLabel : `Cardápios para ${objetivoLabel}`}</Text>
-        <Text style={styles.heroSubtitle}>
-          {mealKey
+      <ScreenIntroCard
+        eyebrow="Seu plano diario"
+        title={mealKey ? selectedMealLabel : `Cardápios para ${objetivoLabel}`}
+        description={
+          mealKey
             ? `Receitas recomendadas para ${selectedMealLabel.toLowerCase()} dentro do plano de ${objetivoLabel.toLowerCase()}.`
-            : `Selecione uma refeição do dia para visualizar receitas alinhadas ao seu objetivo. Meta calórica: ${caloriasObjetivo ? `${caloriasObjetivo} kcal` : "a definir"}`}
-        </Text>
-        <View style={styles.chipRow}>
-          {refreshing ? <Chip label="Atualizando..." /> : null}
-          {staleData ? <Chip label="Mostrando dados salvos" tone="warning" /> : null}
-          {mealKey && hasActiveFilters ? <Chip label={`${totalMatches} receitas encontradas`} /> : null}
-        </View>
+            : `Selecione uma refeição do dia para visualizar receitas alinhadas ao seu objetivo. Meta calórica: ${caloriasObjetivo ? `${caloriasObjetivo} kcal` : "a definir"}`
+        }
+        badges={
+          <View style={styles.chipRow}>
+            {refreshing ? <Chip label="Atualizando..." /> : null}
+            {staleData ? <Chip label="Mostrando dados salvos" tone="warning" /> : null}
+            {mealKey && hasActiveFilters ? <Chip label={`${totalMatches} receitas encontradas`} /> : null}
+          </View>
+        }
+      >
         {feedback ? <Text style={styles.warningText}>{feedback}</Text> : null}
-      </HeroCard>
+      </ScreenIntroCard>
 
       {loading ? (
         <StatusCard
@@ -1493,8 +1761,7 @@ export function MealPlansScreen({ navigation, route }) {
       ) : null}
 
       {mealKey ? (
-        <Card>
-          <SectionHeader title="Busca inteligente" trailing={selectedMealLabel} />
+        <SectionCard title="Busca inteligente" trailing={selectedMealLabel}>
           <InputField
             label="Título ou ingrediente"
             value={searchQuery}
@@ -1544,12 +1811,11 @@ export function MealPlansScreen({ navigation, route }) {
             ]}
           />
           {hasActiveFilters ? <Button label="Limpar filtros" variant="ghost" onPress={clearFilters} /> : null}
-        </Card>
+        </SectionCard>
       ) : null}
 
       {!mealKey && !fatalError ? (
-        <Card>
-          <SectionHeader title="Refeições disponíveis" helper="Escolha uma refeição para ver as receitas." />
+        <SectionCard title="Refeições disponíveis" helper="Escolha uma refeição para ver as receitas.">
           <View style={styles.mealPillGrid}>
             {mealEntries.map(([currentMealKey, receitas]) => (
               <SurfacePressable
@@ -1577,12 +1843,11 @@ export function MealPlansScreen({ navigation, route }) {
               </SurfacePressable>
             ))}
           </View>
-        </Card>
+        </SectionCard>
       ) : null}
 
       {mealKey && !fatalError ? filteredEntries.map(([currentMealKey, receitas]) => (
-        <Card key={currentMealKey}>
-          <SectionHeader title={mealLabels[currentMealKey]} trailing={`${receitas.length} opcoes`} />
+        <SectionCard key={currentMealKey} title={mealLabels[currentMealKey]} trailing={`${receitas.length} opcoes`}>
           {receitas.length === 0 ? (
             <EmptyStateCard
               title={hasActiveFilters ? "Nenhuma receita encontrada" : "Nenhuma receita disponível"}
@@ -1622,7 +1887,7 @@ export function MealPlansScreen({ navigation, route }) {
               }}
             />
           )}
-        </Card>
+        </SectionCard>
       )) : null}
 
       {hasActiveFilters && totalMatches === 0 ? (
@@ -1755,16 +2020,17 @@ export function RecipeDetailsScreen({ navigation, route }) {
   if (!isPremium && !adLiberado) {
     return (
       <Page>
-        <Card>
-          <Text style={styles.eyebrow}>Modo gratuito</Text>
-          <Text style={styles.heroTitle}>Anúncio patrocinado</Text>
-          <Text style={styles.heroSubtitle}>A receita será liberada em {adTimer}s.</Text>
+        <ScreenIntroCard
+          eyebrow="Modo gratuito"
+          title="Anúncio patrocinado"
+          description={`A receita será liberada em ${adTimer}s.`}
+        >
           <Card style={styles.adBox}>
             <Text style={styles.historyTitle}>Suplemento Nutri+</Text>
             <Text style={styles.historyDescription}>Recupere melhor no pós-treino com fórmula de aminoácidos.</Text>
           </Card>
           <Button label={adTimer > 0 ? `Aguarde ${adTimer}s` : "Ver receita"} onPress={() => setAdLiberado(true)} disabled={adTimer > 0} />
-        </Card>
+        </ScreenIntroCard>
       </Page>
     )
   }
@@ -1778,7 +2044,7 @@ export function RecipeDetailsScreen({ navigation, route }) {
           {feedback ? <Chip label={feedback} tone="warning" /> : null}
         </View>
       ) : null}
-      <Card>
+      <ScreenIntroCard>
         {receita.imageUrl ? (
           <ImageBackground source={{ uri: receita.imageUrl }} imageStyle={styles.recipeHeroImage} style={styles.recipeHero}>
             <View style={styles.recipeOverlay}>
@@ -1798,21 +2064,19 @@ export function RecipeDetailsScreen({ navigation, route }) {
           <Chip label={`Fonte: ${source === "supabase" ? "Supabase" : source === "cache" ? "Cache local" : "Fallback local"}`} />
         </View>
         {feedback ? <StatusCard tone="warning" title="Receita exibida com dados locais" description={feedback} /> : null}
-      </Card>
+      </ScreenIntroCard>
 
-      <Card>
-        <SectionHeader title="Ingredientes da receita" />
+      <SectionCard title="Ingredientes da receita">
         {receita.ingredientes.map((item) => (
           <Text key={item} style={styles.bulletItem}>• {item}</Text>
         ))}
-      </Card>
+      </SectionCard>
 
-      <Card>
-        <SectionHeader title="Modo de preparo" />
+      <SectionCard title="Modo de preparo">
         {receita.preparo.map((item, index) => (
           <Text key={item} style={styles.bulletItem}>{index + 1}. {item}</Text>
         ))}
-      </Card>
+      </SectionCard>
 
       <Button
         label={route.params?.backLabel ? `Voltar para ${route.params.backLabel}` : "Voltar aos cardápios"}
@@ -1856,7 +2120,7 @@ export function PremiumScreen() {
   }
 
   return (
-    <Page>
+    <TabPage>
       <HeroCard style={styles.premiumHeroCard}>
         <LinearGradient colors={["#17392c", "#285843", "#3f7e5f"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.premiumHeroGradient}>
           <Text style={styles.premiumHeroEyebrow}>Assinatura premium</Text>
@@ -1871,8 +2135,7 @@ export function PremiumScreen() {
         </LinearGradient>
       </HeroCard>
 
-      <Card>
-        <SectionHeader title="Comparativo de planos" helper="Selecione a modalidade que faz mais sentido para sua rotina." />
+      <SectionCard title="Comparativo de planos" helper="Selecione a modalidade que faz mais sentido para sua rotina.">
         <View style={styles.premiumPlansStack}>
           {premiumPlans.map((plan) => {
             const isSelected = selectedPlan === plan.key
@@ -1943,10 +2206,9 @@ export function PremiumScreen() {
             )
           })}
         </View>
-      </Card>
+      </SectionCard>
 
-      <Card>
-        <SectionHeader title="O que você libera" helper="Benefícios desenhados para dar mais ritmo e menos fricção no uso diário." />
+      <SectionCard title="O que você libera" helper="Benefícios desenhados para dar mais ritmo e menos fricção no uso diário.">
         <View style={styles.premiumBenefitsGrid}>
           <SurfaceBox style={styles.premiumBenefitCard}>
             <Text style={styles.premiumBenefitTitle}>Receitas sem bloqueio</Text>
@@ -1961,10 +2223,9 @@ export function PremiumScreen() {
             <Text style={styles.premiumBenefitCopy}>Área pronta para receber recursos exclusivos, comparativos de planos e upgrades futuros.</Text>
           </SurfaceBox>
         </View>
-      </Card>
+      </SectionCard>
 
-      <Card>
-        <SectionHeader title="Resumo da assinatura" trailing={selectedPlanData.title} />
+      <SectionCard title="Resumo da assinatura" trailing={selectedPlanData.title}>
         <Text style={styles.premiumSummaryText}>
           {isPremium
             ? `Seu acesso premium está ativo no ${activePlan.title.toLowerCase()}.`
@@ -1992,10 +2253,9 @@ export function PremiumScreen() {
           }
           onPress={handleManageAccess}
         />
-      </Card>
+      </SectionCard>
 
-      <Card>
-        <SectionHeader title="FAQ de cobrança" helper="Perguntas principais para reduzir dúvidas antes da assinatura." />
+      <SectionCard title="FAQ de cobrança" helper="Perguntas principais para reduzir dúvidas antes da assinatura.">
         <View style={styles.premiumFaqList}>
           {premiumFaqItems.map((item) => (
             <SurfaceBox key={item.question} style={styles.premiumFaqCard} tone="default">
@@ -2004,8 +2264,8 @@ export function PremiumScreen() {
             </SurfaceBox>
           ))}
         </View>
-      </Card>
-    </Page>
+      </SectionCard>
+    </TabPage>
   )
 }
 
@@ -2015,19 +2275,261 @@ export function PlaceholderScreen({ title, description, bullets }) {
 
   return (
     <Page>
-      <Card>
-        <SectionHeader title={title} helper={description} trailing={objetivoLabel} />
+      <ScreenIntroCard
+        eyebrow="Modulo em preparacao"
+        title={title}
+        description={description}
+        trailing={objetivoLabel}
+      >
         <SurfaceBox style={styles.placeholderHighlight} tone="soft">
           <Text style={styles.historyTitle}>Espaco reservado no menu</Text>
           <Text style={styles.historyDescription}>Essa area ja esta pronta na navegacao mobile para evoluir sem refazer a estrutura principal.</Text>
         </SurfaceBox>
+      </ScreenIntroCard>
+      <SectionCard title="Blocos previstos" helper="Estrutura já organizada para crescer no mesmo padrão visual.">
         {bullets.map((bullet) => (
           <SurfaceBox key={bullet} style={styles.placeholderItem} tone="muted">
             <Text style={styles.historyTitle}>{bullet}</Text>
             <Text style={styles.historyDescription}>Quando você quiser, a gente pode transformar este bloco em uma tela funcional mantendo a mesma linguagem visual.</Text>
           </SurfaceBox>
         ))}
-      </Card>
+      </SectionCard>
+    </Page>
+  )
+}
+
+export function SettingsScreen() {
+  useScreenPerformance("SettingsScreen")
+  const { email, profileSyncing } = useAppDataContext()
+  const nome = useUserStore((state) => state.nome)
+  const idade = useUserStore((state) => state.idade)
+  const peso = useUserStore((state) => state.peso)
+  const altura = useUserStore((state) => state.altura)
+  const sexo = useUserStore((state) => state.sexo)
+  const atividade = useUserStore((state) => state.atividade)
+  const objetivo = useUserStore((state) => state.objetivo)
+  const tmb = useUserStore((state) => state.tmb)
+  const tdee = useUserStore((state) => state.tdee)
+  const caloriasObjetivo = useUserStore((state) => state.caloriasObjetivo)
+  const [form, setForm] = useState({
+    nome,
+    idade,
+    peso,
+    altura,
+    sexo,
+    atividade,
+    objetivo,
+  })
+  const [feedback, setFeedback] = useState("")
+  const [successMessage, setSuccessMessage] = useState("")
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setForm({
+      nome,
+      idade,
+      peso,
+      altura,
+      sexo,
+      atividade,
+      objetivo,
+    })
+  }, [nome, idade, peso, altura, sexo, atividade, objetivo])
+
+  const estimatedMetrics = useMemo(() => calculateMetabolicData(form), [form])
+
+  function updateField(key, value) {
+    setForm((current) => ({
+      ...current,
+      [key]: value,
+    }))
+  }
+
+  async function salvarConfiguracoes() {
+    const trimmedNome = String(form.nome ?? "").trim()
+
+    if (trimmedNome.length < 2) {
+      setFeedback("Informe um nome com pelo menos 2 caracteres.")
+      return
+    }
+
+    if (!parsePositiveNumber(form.idade)) {
+      setFeedback("Revise a idade antes de salvar.")
+      return
+    }
+
+    if (!parsePositiveNumber(form.peso)) {
+      setFeedback("Revise o peso antes de salvar.")
+      return
+    }
+
+    if (!parsePositiveNumber(form.altura)) {
+      setFeedback("Revise a altura antes de salvar.")
+      return
+    }
+
+    if (!form.sexo || !form.atividade || !form.objetivo) {
+      setFeedback("Selecione sexo, atividade e objetivo para salvar.")
+      return
+    }
+
+    setSaving(true)
+    setFeedback("")
+    setSuccessMessage("")
+
+    try {
+      const nextProfile = {
+        nome: trimmedNome,
+        idade: normalizeIntegerInput(form.idade),
+        peso: normalizeDecimalInput(form.peso),
+        altura: normalizeIntegerInput(form.altura),
+        sexo: form.sexo,
+        atividade: form.atividade,
+        objetivo: form.objetivo,
+        ...estimatedMetrics,
+      }
+
+      useUserStore.setState(nextProfile)
+
+      if (hasSupabaseConfig && supabase) {
+        const { data, error: userError } = await supabase.auth.getUser()
+
+        if (userError) {
+          setFeedback("Não foi possível identificar sua sessão para salvar o perfil.")
+          return
+        }
+
+        const userId = data.user?.id ?? ""
+        if (!userId) {
+          setFeedback("Usuário autenticado não encontrado para salvar o perfil.")
+          return
+        }
+
+        const { error } = await supabase.from("perfis").upsert(
+          {
+            user_id: userId,
+            nome: nextProfile.nome,
+            idade: Number(nextProfile.idade),
+            peso: Number(nextProfile.peso),
+            altura: Number(nextProfile.altura),
+            sexo: nextProfile.sexo,
+            atividade: nextProfile.atividade,
+            objetivo: nextProfile.objetivo,
+            tmb: nextProfile.tmb,
+            tdee: nextProfile.tdee,
+            calorias_objetivo: nextProfile.caloriasObjetivo,
+          },
+          { onConflict: "user_id" },
+        )
+
+        if (error) {
+          setFeedback("Não foi possível sincronizar as alterações com o Supabase.")
+          return
+        }
+      }
+
+      setSuccessMessage("Dados atualizados com sucesso.")
+    } catch (error) {
+      setFeedback(error?.message ?? "Ocorreu um erro ao salvar as configurações.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Page>
+      <ScreenIntroCard
+        eyebrow="Configurações"
+        title="Seus dados"
+        description="Atualize suas informações pessoais e os dados usados no seu plano."
+      >
+        <View style={styles.chipRow}>
+          {email ? <Chip label={email} /> : null}
+          {profileSyncing ? <Chip label="Sincronizando perfil..." /> : null}
+        </View>
+      </ScreenIntroCard>
+
+      <SectionCard title="Informações pessoais" helper="Dados básicos exibidos no seu acompanhamento.">
+        <InputField label="Nome" value={form.nome} onChangeText={(value) => updateField("nome", value)} placeholder="Seu nome" />
+        <InputField
+          label="Idade"
+          value={form.idade}
+          onChangeText={(value) => updateField("idade", normalizeIntegerInput(value))}
+          placeholder="Ex: 32"
+          keyboardType="number-pad"
+        />
+        <InputField
+          label="Peso em kg"
+          value={form.peso}
+          onChangeText={(value) => updateField("peso", normalizeDecimalInput(value))}
+          placeholder="Ex: 72,4"
+          keyboardType="decimal-pad"
+        />
+        <InputField
+          label="Altura em cm"
+          value={form.altura}
+          onChangeText={(value) => updateField("altura", normalizeIntegerInput(value))}
+          placeholder="Ex: 168"
+          keyboardType="number-pad"
+        />
+      </SectionCard>
+
+      <SectionCard title="Perfil do plano" helper="Essas escolhas ajustam a base metabólica e a meta calórica.">
+        <View style={styles.filterGroup}>
+          <Text style={styles.filterTitle}>Sexo</Text>
+          <View style={styles.chipRow}>
+            <Chip label="Masculino" active={form.sexo === "masculino"} onPress={() => updateField("sexo", "masculino")} />
+            <Chip label="Feminino" active={form.sexo === "feminino"} onPress={() => updateField("sexo", "feminino")} />
+          </View>
+        </View>
+
+        <View style={styles.filterGroup}>
+          <Text style={styles.filterTitle}>Atividade</Text>
+          <View style={styles.chipRow}>
+            {activityOptions.map((option) => (
+              <Chip
+                key={option.value}
+                label={option.label}
+                active={form.atividade === option.value}
+                onPress={() => updateField("atividade", option.value)}
+              />
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.filterGroup}>
+          <Text style={styles.filterTitle}>Objetivo</Text>
+          <View style={styles.chipRow}>
+            {objectiveOptions.map((option) => (
+              <Chip
+                key={option.value}
+                label={option.label}
+                active={form.objetivo === option.value}
+                onPress={() => updateField("objetivo", option.value)}
+              />
+            ))}
+          </View>
+        </View>
+      </SectionCard>
+
+      <SectionCard title="Prévia atualizada" helper="Estimativa refeita com base nos dados informados.">
+        <View style={styles.metricGrid}>
+          <MetricTile label="TMB" value={estimatedMetrics.tmb ? `${estimatedMetrics.tmb} kcal` : "-"} />
+          <MetricTile label="Gasto diário" value={estimatedMetrics.tdee ? `${estimatedMetrics.tdee} kcal` : "-"} />
+          <MetricTile label="Meta calórica" value={estimatedMetrics.caloriasObjetivo ? `${estimatedMetrics.caloriasObjetivo} kcal` : "-"} />
+        </View>
+        <SurfaceBox tone="soft">
+          <Text style={styles.historyTitle}>Dados salvos hoje</Text>
+          <Text style={styles.historyDescription}>
+            TMB {tmb || 0} kcal • Gasto diário {tdee || 0} kcal • Meta {caloriasObjetivo || 0} kcal
+          </Text>
+        </SurfaceBox>
+      </SectionCard>
+
+      {feedback ? <StatusCard tone="warning" title="Não foi possível salvar" description={feedback} /> : null}
+      {successMessage ? <StatusCard tone="success" title="Perfil atualizado" description={successMessage} /> : null}
+
+      <Button label={saving ? "Salvando..." : "Salvar alterações"} onPress={salvarConfiguracoes} disabled={saving} />
     </Page>
   )
 }
@@ -2186,11 +2688,44 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   dashboardActionGrid: {
-    gap: spacing.xs,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
   },
   dashboardActionCard: {
-    width: "100%",
+    width: "48%",
+    minHeight: 148,
+    justifyContent: "space-between",
+    gap: spacing.md,
+    borderRadius: radius.xl,
+  },
+  dashboardActionTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  dashboardActionIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: radius.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dashboardActionIconSoft: {
+    backgroundColor: colors.brandSoft,
+  },
+  dashboardActionIconDefault: {
+    backgroundColor: "#e7f3e8",
+  },
+  dashboardActionContent: {
     gap: 4,
+  },
+  dashboardActionEyebrow: {
+    ...typography.caption,
+    color: colors.brand,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
   },
   dashboardActionTitle: {
     ...typography.bodyStrong,
@@ -2199,6 +2734,7 @@ const styles = StyleSheet.create({
   dashboardActionCopy: {
     ...typography.bodySmall,
     color: colors.textMuted,
+    lineHeight: 18,
   },
   dashboardControlStack: {
     gap: spacing.xs,
@@ -2215,6 +2751,9 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  mealProgressCardFill: {
+    flex: 1,
   },
   mealProgressCardFallback: {
     backgroundColor: "#f9f6ef",
@@ -2329,14 +2868,252 @@ const styles = StyleSheet.create({
     ...typography.bodySmall,
     color: colors.text,
   },
-  chartLabelRow: {
+  evolutionHeroCard: {
+    padding: 0,
+    overflow: "hidden",
+  },
+  evolutionHeroGradient: {
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  evolutionHeroTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: spacing.md,
+  },
+  evolutionHeroTitleWrap: {
+    flex: 1,
     gap: spacing.xs,
   },
-  chartLabel: {
+  evolutionHeroEyebrow: {
+    ...typography.caption,
+    color: "rgba(255,253,250,0.72)",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  evolutionHeroTitle: {
+    ...typography.h2,
+    color: colors.surface,
+  },
+  evolutionHeroSubtitle: {
+    ...typography.bodySmall,
+    color: "rgba(255,253,250,0.84)",
+  },
+  evolutionHeroMetricsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  evolutionHeroMetricCard: {
+    flexGrow: 1,
+    minWidth: "30%",
+    borderRadius: radius.lg,
+    padding: spacing.sm,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    gap: 4,
+  },
+  evolutionHeroMetricLabel: {
+    ...typography.caption,
+    color: "rgba(255,253,250,0.68)",
+    textTransform: "uppercase",
+  },
+  evolutionHeroMetricValue: {
+    ...typography.h2,
+    color: colors.surface,
+  },
+  evolutionHeroMetricHint: {
+    ...typography.bodySmall,
+    color: "rgba(255,253,250,0.8)",
+  },
+  evolutionInsightRow: {
+    gap: spacing.sm,
+  },
+  evolutionInsightCard: {
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    backgroundColor: "rgba(12, 28, 21, 0.24)",
+    gap: spacing.xs,
+  },
+  evolutionInsightLabel: {
+    ...typography.caption,
+    color: "#d8efe3",
+    textTransform: "uppercase",
+  },
+  evolutionInsightTitle: {
+    ...typography.h3,
+    color: colors.surface,
+  },
+  evolutionInsightCopy: {
+    ...typography.bodySmall,
+    color: "rgba(255,253,250,0.84)",
+  },
+  evolutionHeroAction: {
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    backgroundColor: colors.surfaceHighlight,
+    borderWidth: 1,
+    borderColor: "#eadb91",
+    gap: spacing.xs,
+  },
+  evolutionHeroActionLabel: {
+    ...typography.caption,
+    color: colors.brandDark,
+    textTransform: "uppercase",
+  },
+  evolutionHeroActionTitle: {
+    ...typography.bodyStrong,
+    color: colors.brandDark,
+  },
+  evolutionHeroActionCopy: {
+    ...typography.bodySmall,
+    color: "#345845",
+  },
+  evolutionChartCard: {
+    gap: spacing.md,
+    backgroundColor: colors.surfaceWarm,
+  },
+  evolutionChartHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: spacing.md,
+  },
+  evolutionChartHeaderCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  evolutionSectionEyebrow: {
+    ...typography.caption,
+    color: colors.brand,
+    textTransform: "uppercase",
+  },
+  evolutionSectionTitle: {
+    ...typography.h3,
+    color: colors.text,
+  },
+  evolutionSectionHelper: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
+  },
+  evolutionChartRangeBadge: {
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    backgroundColor: colors.surfaceMuted,
+    gap: 2,
+  },
+  evolutionChartRangeLabel: {
     ...typography.caption,
     color: colors.textMuted,
+    textTransform: "uppercase",
+  },
+  evolutionChartRangeValue: {
+    ...typography.bodyStrong,
+    color: colors.text,
+  },
+  evolutionChartShell: {
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+  },
+  evolutionChartFooter: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  evolutionChartFooterItem: {
+    minWidth: "30%",
+    flexGrow: 1,
+    gap: 2,
+  },
+  evolutionChartFooterDate: {
+    ...typography.caption,
+    color: colors.textMuted,
+  },
+  evolutionChartFooterWeight: {
+    ...typography.bodySmall,
+    color: colors.text,
+  },
+  evolutionChartFooterWeightActive: {
+    color: colors.brandDark,
+    fontWeight: "700",
+  },
+  evolutionBodyCard: {
+    gap: spacing.md,
+  },
+  evolutionProfileGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  evolutionProfileTile: {
+    flexGrow: 1,
+    minWidth: "46%",
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    gap: 4,
+  },
+  evolutionProfileLabel: {
+    ...typography.caption,
+    color: colors.textMuted,
+    textTransform: "uppercase",
+  },
+  evolutionProfileValue: {
+    ...typography.bodyStrong,
+    color: colors.text,
+  },
+  evolutionCadenceBox: {
+    gap: spacing.xs,
+  },
+  evolutionCadenceLabel: {
+    ...typography.caption,
+    color: colors.brand,
+    textTransform: "uppercase",
+  },
+  evolutionCadenceTitle: {
+    ...typography.h3,
+    color: colors.text,
+  },
+  evolutionCadenceCopy: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
+  },
+  evolutionTimelineItem: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: spacing.sm,
+  },
+  evolutionTimelineMarker: {
+    width: 18,
+    alignItems: "center",
+    paddingTop: 6,
+  },
+  evolutionTimelineDot: {
+    width: 10,
+    height: 10,
+    borderRadius: radius.round,
+    backgroundColor: colors.brand,
+  },
+  evolutionTimelineContent: {
+    flex: 1,
+  },
+  evolutionTimelineHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: spacing.md,
+    alignItems: "center",
+  },
+  evolutionTimelineValueBlock: {
+    alignItems: "flex-end",
+    gap: 2,
   },
   historyItem: {
     flexDirection: "row",
@@ -2374,11 +3151,13 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textTransform: "uppercase",
   },
-  communityShell: {
-    backgroundColor: colors.surface,
-    gap: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+  communityHeroCard: {
+    padding: 0,
+    overflow: "hidden",
+  },
+  communityHeroGradient: {
+    padding: spacing.md,
+    gap: spacing.sm,
   },
   communityTopBar: {
     flexDirection: "row",
@@ -2388,44 +3167,57 @@ const styles = StyleSheet.create({
   },
   communityTitleWrap: {
     flex: 1,
-    gap: spacing.xs,
+    gap: 2,
   },
   communitySectionLabel: {
     ...typography.caption,
     color: colors.brand,
     textTransform: "uppercase",
   },
+  communitySectionLabelOnDark: {
+    ...typography.caption,
+    color: "rgba(255,253,250,0.72)",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
   communitySectionTitle: {
     ...typography.h2,
     color: colors.text,
+  },
+  communitySectionTitleOnDark: {
+    ...typography.h3,
+    color: colors.surface,
   },
   communitySectionSubtitle: {
     ...typography.bodySmall,
     color: colors.textMuted,
   },
   communityComposerEntry: {
-    gap: spacing.sm,
+    gap: spacing.xs,
   },
   communityComposerPromptButton: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
     borderRadius: radius.lg,
-    padding: spacing.sm,
-    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 12,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
   },
   communityComposerInlineActions: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: spacing.sm,
+    gap: spacing.xs,
   },
   communityComposerAvatar: {
-    width: 44,
-    height: 44,
+    width: 38,
+    height: 38,
     borderRadius: radius.round,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.brandSoft,
+    backgroundColor: "#e6f3eb",
   },
   communityComposerAvatarText: {
     ...typography.bodyStrong,
@@ -2436,12 +3228,18 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   communityComposerPromptTitle: {
-    ...typography.bodyStrong,
+    ...typography.body,
+    fontWeight: "600",
     color: colors.text,
   },
   communityComposerPromptHint: {
-    ...typography.bodySmall,
+    ...typography.caption,
     color: colors.textMuted,
+  },
+  communityStatusRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
   },
   communityComposerEntryAction: {
     borderRadius: radius.round,
@@ -2455,11 +3253,11 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   communityComposerCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceWarm,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.accentSoft,
     padding: spacing.md,
-    gap: spacing.sm,
+    gap: spacing.md,
   },
   communityComposerCompactHeader: {
     flexDirection: "row",
@@ -2488,20 +3286,21 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   communityFeedCard: {
-    paddingHorizontal: 0,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.lg,
     gap: spacing.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   communityFeedHeader: {
-    paddingHorizontal: spacing.lg,
     gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderRadius: radius.xl,
+    backgroundColor: colors.brandSoft,
+    borderWidth: 1,
+    borderColor: "#bfe0c7",
   },
   communityFeedList: {
     gap: spacing.md,
+    paddingHorizontal: spacing.xs,
+    paddingBottom: spacing.sm,
   },
   warningText: {
     ...typography.bodySmall,
@@ -2513,7 +3312,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.sm,
     borderRadius: radius.lg,
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: colors.surfaceWarm,
+    borderWidth: 1,
+    borderColor: colors.accentSoft,
   },
   communityPreviewLabel: {
     ...typography.caption,
@@ -2542,11 +3343,12 @@ const styles = StyleSheet.create({
   },
   communityPost: {
     gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    padding: spacing.md,
+    borderRadius: 24,
     backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    ...shadow.card,
   },
   communityPostHeader: {
     flexDirection: "row",
@@ -2569,6 +3371,12 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
+  communityMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
   communityAuthor: {
     ...typography.bodyStrong,
     color: colors.text,
@@ -2590,28 +3398,55 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     letterSpacing: 1,
   },
+  communityMealBadge: {
+    borderRadius: radius.round,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    backgroundColor: colors.brandSoft,
+  },
+  communityMealBadgeText: {
+    ...typography.caption,
+    color: colors.brandDark,
+    textTransform: "uppercase",
+  },
+  communityPostContent: {
+    gap: spacing.xs,
+    paddingHorizontal: 2,
+  },
   communityCaption: {
     ...typography.h3,
     color: colors.text,
   },
   communityBody: {
     ...typography.bodySmall,
-    color: colors.textMuted,
+    color: "#526258",
   },
   communityPostImage: {
     width: "100%",
-    height: 300,
-    borderRadius: radius.lg,
+    height: 320,
+    borderRadius: 22,
     backgroundColor: colors.surfaceMuted,
   },
   communityEditBox: {
     gap: spacing.sm,
+  },
+  communityPostStats: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  communityPostStatsText: {
+    ...typography.caption,
+    color: colors.textMuted,
   },
   communityActions: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.sm,
     paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: "#efe7da",
   },
   communityCommentSection: {
     gap: spacing.sm,
@@ -2627,9 +3462,9 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     padding: spacing.md,
     borderRadius: radius.md,
-    backgroundColor: "#fbf8f2",
+    backgroundColor: colors.surfaceWarm,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.accentSoft,
   },
   communityCommentHeader: {
     flexDirection: "row",
@@ -2720,7 +3555,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: "center",
     paddingTop: spacing.sm,
-    paddingHorizontal: spacing.lg,
   },
   communitySuccessText: {
     ...typography.bodySmall,

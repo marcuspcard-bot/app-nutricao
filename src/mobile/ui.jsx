@@ -207,6 +207,40 @@ export function SectionHeader({ title, helper, trailing }) {
   )
 }
 
+export function SectionCard({ title, helper, trailing, children, style }) {
+  return (
+    <Card style={style}>
+      <SectionHeader title={title} helper={helper} trailing={trailing} />
+      {children}
+    </Card>
+  )
+}
+
+export function ScreenIntroCard({
+  eyebrow,
+  title,
+  description,
+  trailing,
+  badges,
+  children,
+  style,
+}) {
+  return (
+    <Card style={[styles.screenIntroCard, style]}>
+      <View style={styles.screenIntroHeader}>
+        <View style={styles.screenIntroCopy}>
+          {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
+          {title ? <Text style={styles.screenIntroTitle}>{title}</Text> : null}
+          {description ? <Text style={styles.screenIntroDescription}>{description}</Text> : null}
+        </View>
+        {trailing ? <Text style={styles.sectionTrailing}>{trailing}</Text> : null}
+      </View>
+      {badges ? <View style={styles.screenIntroBadges}>{badges}</View> : null}
+      {children}
+    </Card>
+  )
+}
+
 export function MetricTile({ label, value }) {
   return (
     <View style={styles.metricTile}>
@@ -247,7 +281,38 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     padding: spacing.lg,
     gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
     ...shadow.card,
+  },
+  screenIntroCard: {
+    backgroundColor: colors.surfaceWarm,
+    borderWidth: 1,
+    borderColor: colors.accentSoft,
+    gap: spacing.md,
+  },
+  screenIntroHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: spacing.md,
+  },
+  screenIntroCopy: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  screenIntroTitle: {
+    ...typography.h2,
+    color: colors.text,
+  },
+  screenIntroDescription: {
+    ...typography.body,
+    color: colors.textMuted,
+  },
+  screenIntroBadges: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
   },
   surfaceBox: {
     borderRadius: radius.lg,
@@ -262,14 +327,18 @@ const styles = StyleSheet.create({
   },
   surfaceBoxMuted: {
     backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   surfaceBoxSoft: {
-    backgroundColor: colors.brandSoft,
+    backgroundColor: colors.accentSoft,
+    borderWidth: 1,
+    borderColor: "#f3c997",
   },
   surfaceBoxDefault: {
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
   },
   button: {
     borderRadius: radius.round,
@@ -282,12 +351,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brand,
   },
   button_secondary: {
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: colors.surfaceWarm,
+    borderWidth: 1,
+    borderColor: colors.accentSoft,
   },
   button_ghost: {
     backgroundColor: "transparent",
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
   },
   buttonDisabled: {
     opacity: 0.5,
@@ -317,11 +388,11 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: 14,
-    backgroundColor: colors.surface,
+    backgroundColor: "#fffaf2",
     color: colors.text,
     ...typography.body,
   },
@@ -332,10 +403,10 @@ const styles = StyleSheet.create({
   optionCard: {
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     padding: spacing.md,
     gap: spacing.xs,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceWarm,
   },
   optionCardActive: {
     borderColor: colors.brand,
@@ -351,19 +422,25 @@ const styles = StyleSheet.create({
   },
   chip: {
     borderRadius: radius.round,
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: colors.surfaceWarm,
+    borderWidth: 1,
+    borderColor: colors.accentSoft,
     paddingHorizontal: spacing.md,
     paddingVertical: 8,
   },
   chipWarning: {
     borderRadius: radius.round,
     backgroundColor: colors.warningSoft,
+    borderWidth: 1,
+    borderColor: "#efd69b",
     paddingHorizontal: spacing.md,
     paddingVertical: 8,
   },
   chipActive: {
     borderRadius: radius.round,
     backgroundColor: colors.brand,
+    borderWidth: 1,
+    borderColor: colors.brandDark,
     paddingHorizontal: spacing.md,
     paddingVertical: 8,
   },
@@ -375,13 +452,16 @@ const styles = StyleSheet.create({
     color: colors.surface,
   },
   statusNeutral: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceWarm,
+    borderColor: colors.accentSoft,
   },
   statusWarning: {
     backgroundColor: colors.warningSoft,
+    borderColor: "#efd69b",
   },
   statusSuccess: {
     backgroundColor: colors.successSoft,
+    borderColor: "#bfe0c7",
   },
   eyebrow: {
     ...typography.caption,
@@ -405,11 +485,11 @@ const styles = StyleSheet.create({
     borderRadius: radius.round,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.brandSoft,
+    backgroundColor: colors.accentSoft,
   },
   emptyIconText: {
     ...typography.h3,
-    color: colors.brand,
+    color: colors.accent,
   },
   sectionHeader: {
     flexDirection: "row",
@@ -431,13 +511,15 @@ const styles = StyleSheet.create({
   },
   sectionTrailing: {
     ...typography.caption,
-    color: colors.textMuted,
+    color: colors.brandDark,
   },
   metricTile: {
     flex: 1,
     minWidth: 100,
     borderRadius: radius.md,
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: colors.brandSoft,
+    borderWidth: 1,
+    borderColor: "#bfe0c7",
     padding: spacing.md,
     gap: spacing.xs,
   },
@@ -453,7 +535,7 @@ const styles = StyleSheet.create({
   progressTrack: {
     height: 10,
     borderRadius: radius.round,
-    backgroundColor: colors.border,
+    backgroundColor: "#e1ecdc",
     overflow: "hidden",
   },
   progressBar: {

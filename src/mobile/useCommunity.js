@@ -132,7 +132,7 @@ async function persistFeedCache(posts, hasMorePosts, source = "supabase") {
 }
 
 export function useCommunity(authorName) {
-  const [posts, setPosts] = useState(normalizePosts(fallbackPosts))
+  const [posts, setPosts] = useState(() => (hasSupabaseConfig ? [] : normalizePosts(fallbackPosts)))
   const [loading, setLoading] = useState(true)
   const [initialLoading, setInitialLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -149,8 +149,8 @@ export function useCommunity(authorName) {
   const [deletingPostId, setDeletingPostId] = useState("")
   const [deletingCommentId, setDeletingCommentId] = useState("")
   const [hasMorePosts, setHasMorePosts] = useState(true)
-  const postsCountRef = useRef(fallbackPosts.length)
-  const postsRef = useRef(normalizePosts(fallbackPosts))
+  const postsCountRef = useRef(hasSupabaseConfig ? 0 : fallbackPosts.length)
+  const postsRef = useRef(hasSupabaseConfig ? [] : normalizePosts(fallbackPosts))
   const latestLoadRequestIdRef = useRef(0)
 
   useEffect(() => {
@@ -243,10 +243,10 @@ export function useCommunity(authorName) {
           await persistFeedCache(nextPosts, hasMore, "supabase")
         }
       } else if (!isAppend) {
-        setPosts(normalizePosts(fallbackPosts))
-        setSource("local")
+        setPosts([])
+        setSource("supabase")
         setHasMorePosts(false)
-        setFeedback("Ainda não existem posts no Supabase. Exibindo exemplos locais.")
+        setFeedback("Ainda não existem posts na comunidade do Supabase.")
       } else {
         setHasMorePosts(false)
       }
@@ -261,6 +261,11 @@ export function useCommunity(authorName) {
         setFeedback("Sem conexão no momento. Exibindo feed salvo neste aparelho.")
         setStaleData(true)
       } else {
+        if (!isAppend) {
+          setPosts([])
+          setHasMorePosts(false)
+          setSource("supabase")
+        }
         setFeedback(`Não foi possível carregar a comunidade agora. ${error.message || ""}`.trim())
       }
     } finally {
